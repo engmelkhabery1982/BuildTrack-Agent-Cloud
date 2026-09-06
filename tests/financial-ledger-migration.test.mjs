@@ -3,15 +3,6 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
-const PYTHON_BIN = (() => {
-  try {
-    execFileSync('python3', ['--version'], { stdio: 'ignore' });
-    return 'python3';
-  } catch {
-    return 'python';
-  }
-})();
-
 test('financial-ledger migration executes and remains synchronized in SQLite', () => {
   const rust = readFileSync(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8');
   const match = rust.match(/version:\s*21,[\s\S]*?sql:\s*r#"([\s\S]*?)"#,\s*kind:/);
@@ -49,7 +40,7 @@ db.execute("DELETE FROM cash_flow WHERE id='cash-1'")
 assert db.execute("SELECT count(*) FROM financial_ledger WHERE source_id='cash-1'").fetchone()[0] == 0
 print('ok')
 `;
-  const result = execFileSync(PYTHON_BIN, ['-c', sqliteAcceptance], {
+  const result = execFileSync('python', ['-c', sqliteAcceptance], {
     input: match[1], encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
   }).trim();
   assert.equal(result, 'ok');
@@ -85,7 +76,7 @@ db.execute("DELETE FROM cost_changes WHERE id='cc-1'")
 assert db.execute("SELECT count(*) FROM financial_ledger WHERE source_id='cc-1'").fetchone()[0] == 0
 print('ok')
 `;
-  const result = execFileSync(PYTHON_BIN, ['-c', sqliteAcceptance], {
+  const result = execFileSync('python', ['-c', sqliteAcceptance], {
     input: match[1], encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
   }).trim();
   assert.equal(result, 'ok');
@@ -108,7 +99,7 @@ assert project_id == 'project-1'
 assert json.loads(payload)['project_id'] == 'project-1'
 print('ok')
 `;
-  const result = execFileSync(PYTHON_BIN, ['-c', sqliteAcceptance], { input: match[1], encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+  const result = execFileSync('python', ['-c', sqliteAcceptance], { input: match[1], encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
   assert.equal(result, 'ok');
 });
 
@@ -128,7 +119,7 @@ except sqlite3.IntegrityError:
     pass
 print('ok')
 `;
-  const result = execFileSync(PYTHON_BIN, ['-c', sqliteAcceptance], {
+  const result = execFileSync('python', ['-c', sqliteAcceptance], {
     input: match[1], encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
   }).trim();
   assert.equal(result, 'ok');
@@ -150,7 +141,7 @@ except sqlite3.IntegrityError:
     pass
 print('ok')
 `;
-  const result = execFileSync(PYTHON_BIN, ['-c', sqliteAcceptance], { input: match[1], encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+  const result = execFileSync('python', ['-c', sqliteAcceptance], { input: match[1], encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
   assert.equal(result, 'ok');
 });
 
@@ -173,7 +164,7 @@ except sqlite3.IntegrityError:
     pass
 print('ok')
 `;
-  const result = execFileSync(PYTHON_BIN, ['-c', sqliteAcceptance], { input: match[1], encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+  const result = execFileSync('python', ['-c', sqliteAcceptance], { input: match[1], encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
   assert.equal(result, 'ok');
 });
 
@@ -200,7 +191,7 @@ try:
 except sqlite3.IntegrityError: pass
 print('ok')
 `;
-  const result = execFileSync(PYTHON_BIN, ['-c', sqliteAcceptance], { input: match[1], encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+  const result = execFileSync('python', ['-c', sqliteAcceptance], { input: match[1], encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
   assert.equal(result, 'ok');
 });
 
@@ -230,7 +221,7 @@ try:
 except sqlite3.IntegrityError: pass
 print('ok')
 `;
-  const result = execFileSync(PYTHON_BIN, ['-c', sqliteAcceptance], { input: match[1], encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+  const result = execFileSync('python', ['-c', sqliteAcceptance], { input: match[1], encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
   assert.equal(result, 'ok');
 });
 
@@ -258,7 +249,7 @@ try:
 except sqlite3.IntegrityError: pass
 print('ok')
 `;
-  const result = execFileSync(PYTHON_BIN, ['-c', sqliteAcceptance], { input: match[1], encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+  const result = execFileSync('python', ['-c', sqliteAcceptance], { input: match[1], encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
   assert.equal(result, 'ok');
 });
 
@@ -275,7 +266,7 @@ db.execute("INSERT INTO payment_certificates (id,contract_id,certificate_date_sq
 assert db.execute("SELECT retention_amount_sql,cumulative_retention_amount_sql,advance_recovery_sql,remaining_advance_balance_sql FROM payment_certificates WHERE id='pc-1'").fetchone() == (50.0,50.0,20.0,80.0)
 print('ok')
 `;
-  const result = execFileSync(PYTHON_BIN, ['-c', sqliteAcceptance], { input: match[1], encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+  const result = execFileSync('python', ['-c', sqliteAcceptance], { input: match[1], encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
   assert.equal(result, 'ok');
 });
 
@@ -298,7 +289,7 @@ rows = db.execute('SELECT id,net,cumulative_balance FROM governed_cash_flow_time
 assert rows == [('d',-20.0,-20.0),('a',100.0,100.0),('b',-30.0,70.0),('c',-99.0,70.0)]
 print('ok')
 `;
-  const result = execFileSync(PYTHON_BIN, ['-c', sqliteAcceptance], { input: match[1], encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+  const result = execFileSync('python', ['-c', sqliteAcceptance], { input: match[1], encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
   assert.equal(result, 'ok');
 });
 
@@ -331,7 +322,7 @@ try:
 except sqlite3.IntegrityError: pass
 print('ok')
 `;
-  const result = execFileSync(PYTHON_BIN, ['-c', sqliteAcceptance], { input: match[1], encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+  const result = execFileSync('python', ['-c', sqliteAcceptance], { input: match[1], encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
   assert.equal(result, 'ok');
 });
 
@@ -363,7 +354,7 @@ except sqlite3.IntegrityError:
   raise AssertionError('a cash movement outside the locked period must remain mutable')
 print('ok')
 `;
-  const result = execFileSync(PYTHON_BIN, ['-c', sqliteAcceptance], { input: match[1], encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+  const result = execFileSync('python', ['-c', sqliteAcceptance], { input: match[1], encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
   assert.equal(result, 'ok');
 });
 
@@ -390,7 +381,7 @@ except sqlite3.IntegrityError:
   raise AssertionError('a PO outside the closed period must remain mutable')
 print('ok')
 `;
-  const result = execFileSync(PYTHON_BIN, ['-c', sqliteAcceptance], { input: match[1], encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+  const result = execFileSync('python', ['-c', sqliteAcceptance], { input: match[1], encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
   assert.equal(result, 'ok');
 });
 
@@ -426,6 +417,6 @@ try:
 except sqlite3.IntegrityError: pass
 print('ok')
 `;
-  const result = execFileSync(PYTHON_BIN, ['-c', sqliteAcceptance], { input: match[1], encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+  const result = execFileSync('python', ['-c', sqliteAcceptance], { input: match[1], encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
   assert.equal(result, 'ok');
 });

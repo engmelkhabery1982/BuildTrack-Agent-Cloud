@@ -6,15 +6,6 @@ import { runDataQualityChecks } from '../src/data/dataQuality.ts';
 import { calculateControlAccountSummary } from '../src/utils/controlAccountSummary.ts';
 import { buildQuantityLedger } from '../src/utils/quantityLedger.ts';
 
-const PYTHON_BIN = (() => {
-  try {
-    execFileSync('python3', ['--version'], { stdio: 'ignore' });
-    return 'python3';
-  } catch {
-    return 'python';
-  }
-})();
-
 test('Control Account migration enforces one scoped main-contract account', () => {
   const rust = readFileSync(new URL('../src-tauri/src/lib.rs', import.meta.url), 'utf8');
   const match = rust.match(/version:\s*44,[\s\S]*?sql:\s*r#"([\s\S]*?)"#,\s*kind:/);
@@ -51,7 +42,7 @@ try:
 except sqlite3.IntegrityError: pass
 print('ok')
 `;
-  const result = execFileSync(PYTHON_BIN, ['-c', sqliteAcceptance], { input: match[1], encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+  const result = execFileSync('python', ['-c', sqliteAcceptance], { input: match[1], encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
   assert.equal(result, 'ok');
 });
 
@@ -102,7 +93,7 @@ try:
 except sqlite3.IntegrityError: pass
 print('ok')
 `;
-  const result = execFileSync(PYTHON_BIN, ['-c', sqliteAcceptance], {
+  const result = execFileSync('python', ['-c', sqliteAcceptance], {
     input: `${model[1]}\n--MIGRATION--\n${sources[1]}`,
     encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'],
   }).trim();

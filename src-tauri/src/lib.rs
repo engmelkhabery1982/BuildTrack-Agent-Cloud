@@ -2251,6 +2251,87 @@ pub fn run() {
     "#,
             kind: tauri_plugin_sql::MigrationKind::Up,
         },
+        tauri_plugin_sql::Migration {
+            version: 53,
+            description: "add_cost_plan_versions_and_periods_governance",
+            sql: r#"
+      CREATE TABLE IF NOT EXISTS cost_plan_versions (
+        id TEXT PRIMARY KEY,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        project_id TEXT NOT NULL,
+        contract_id TEXT NOT NULL,
+        control_account_id TEXT NOT NULL,
+        wbs_id TEXT,
+        cost_code_id TEXT,
+        contract_sov_line_id TEXT,
+        boq_item_id TEXT,
+        version_code TEXT NOT NULL,
+        version_name TEXT NOT NULL,
+        revision_number INTEGER NOT NULL DEFAULT 1,
+        status TEXT NOT NULL CHECK (status IN ('Draft', 'Approved', 'Superseded')),
+        data_date TEXT NOT NULL CHECK (length(data_date) = 10 AND date(data_date, '+0 days') = data_date),
+        delivery_cost_bac REAL NOT NULL CHECK (delivery_cost_bac > 0),
+        curve_type TEXT NOT NULL CHECK (curve_type IN ('Linear', 'Front-loaded', 'Back-loaded', 'Bell', 'S-Curve', 'Manual')),
+        start_date TEXT NOT NULL,
+        end_date TEXT NOT NULL,
+        periods_count INTEGER NOT NULL CHECK (periods_count > 0),
+        owner TEXT NOT NULL DEFAULT '',
+        reason TEXT NOT NULL DEFAULT '',
+        approved_by TEXT,
+        approved_at TEXT,
+        notes TEXT NOT NULL DEFAULT '',
+        payload TEXT NOT NULL,
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE RESTRICT,
+        FOREIGN KEY (contract_id) REFERENCES contracts(id) ON DELETE RESTRICT,
+        FOREIGN KEY (control_account_id) REFERENCES control_accounts(id) ON DELETE RESTRICT
+      );
+      CREATE INDEX IF NOT EXISTS idx_cost_plan_scope ON cost_plan_versions(project_id, contract_id, control_account_id);
+      CREATE INDEX IF NOT EXISTS idx_cost_plan_status ON cost_plan_versions(status);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_cost_plan_unique_code ON cost_plan_versions(project_id, contract_id, lower(version_code));
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_cost_plan_single_approved 
+        ON cost_plan_versions(project_id, contract_id, control_account_id) 
+        WHERE status = 'Approved';
+
+      CREATE TABLE IF NOT EXISTS cost_plan_periods (
+        id TEXT PRIMARY KEY,
+        version_id TEXT NOT NULL,
+        period_index INTEGER NOT NULL,
+        period_start TEXT NOT NULL,
+        period_end TEXT NOT NULL,
+        planned_cost REAL NOT NULL DEFAULT 0,
+        cumulative_cost REAL NOT NULL DEFAULT 0,
+        weight_pct REAL NOT NULL DEFAULT 0,
+        distribution_source TEXT NOT NULL,
+        is_closed_period INTEGER NOT NULL DEFAULT 0,
+        actual_cost REAL DEFAULT 0,
+        notes TEXT DEFAULT '',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (version_id) REFERENCES cost_plan_versions(id) ON DELETE CASCADE,
+        UNIQUE(version_id, period_index)
+      );
+      CREATE INDEX IF NOT EXISTS idx_cost_plan_periods_ver ON cost_plan_periods(version_id);
+
+      CREATE TRIGGER IF NOT EXISTS cost_plan_versions_updated_at
+      AFTER UPDATE ON cost_plan_versions
+      FOR EACH ROW
+      BEGIN
+        UPDATE cost_plan_versions SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS cost_plan_version_immutable_update
+      BEFORE UPDATE ON cost_plan_versions
+      WHEN (OLD.status = 'Superseded')
+        OR (OLD.status = 'Approved' AND NEW.status != 'Superseded')
+      BEGIN SELECT RAISE(ABORT, 'Approved cost plan versions are immutable control points and may only transition to Superseded.'); END;
+
+      CREATE TRIGGER IF NOT EXISTS cost_plan_version_immutable_delete
+      BEFORE DELETE ON cost_plan_versions
+      WHEN OLD.status IN ('Approved', 'Superseded')
+      BEGIN SELECT RAISE(ABORT, 'Approved or Superseded cost plan versions cannot be deleted.'); END;
+    "#,
+            kind: tauri_plugin_sql::MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()

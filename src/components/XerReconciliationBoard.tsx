@@ -37,7 +37,7 @@ export const XerReconciliationBoard: React.FC<XerReconciliationProps> = ({
   );
 
   const [duplicatePolicy, setDuplicatePolicy] = useState<DuplicatePolicy>('update');
-  const [activeTab, setActiveTab] = useState<'activities' | 'relationships' | 'actuals'>('activities');
+  const [activeTab, setActiveTab] = useState<'activities' | 'relationships' | 'wbs' | 'calendars' | 'resources' | 'actuals'>('activities');
   const [currentFileName, setCurrentFileName] = useState<string>('No XER/P6 file loaded');
   const [fileContent, setFileContent] = useState<string>('');
   
@@ -199,7 +199,37 @@ export const XerReconciliationBoard: React.FC<XerReconciliationProps> = ({
       lag_hr_cnt: row.p6Lag * 8
     }));
 
-    const xerText = generateCleanXer(tasks, preds);
+    const wbsNodes = (reconciliationResult.wbsDiffs || []).map(w => ({
+      wbs_code: w.wbsCode,
+      wbs_name: w.wbsName,
+      parent_wbs_code: w.parentCode
+    }));
+
+    const calendars = (reconciliationResult.calendarDiffs || []).map(c => ({
+      calendar_code: c.calendarCode,
+      calendar_name: c.calendarName,
+      hours_per_day: c.hoursPerDay
+    }));
+
+    const resources = (reconciliationResult.resourceDiffs || []).map(r => ({
+      resource_code: r.resourceCode,
+      resource_name: r.resourceName,
+      resource_type: r.resourceType as 'Labor' | 'Equipment' | 'Other'
+    }));
+
+    const assignments = (reconciliationResult.assignmentDiffs || []).map(a => ({
+      task_code: a.activityCode,
+      resource_code: a.resourceCode,
+      planned_hours: a.plannedHours,
+      planned_cost: a.plannedCost
+    }));
+
+    const xerText = generateCleanXer(tasks, preds, {
+      wbsNodes,
+      calendars,
+      resources,
+      assignments
+    });
     const url = URL.createObjectURL(new Blob([xerText], { type: 'text/plain;charset=utf-8' }));
     const anchor = document.createElement('a');
     anchor.href = url;
@@ -307,6 +337,32 @@ export const XerReconciliationBoard: React.FC<XerReconciliationProps> = ({
         </div>
       )}
 
+      {/* Network Validation & Cycle Conflicts Banner */}
+      {reconciliationResult?.cycleConflicts && reconciliationResult.cycleConflicts.length > 0 && (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-3.5 text-xs text-red-900 shadow-sm">
+          <div className="flex items-center gap-2 font-bold text-red-700">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            <span>Predecessor Cycle Conflict Detected ({reconciliationResult.cycleConflicts.length} cycle(s))</span>
+          </div>
+          <p className="mt-1 text-red-600">
+            Circular relationship loop detected in P6 relationship network: {reconciliationResult.cycleConflicts.join(' → ')}.
+            Commit will be governed to prevent scheduling engine deadlocks.
+          </p>
+        </div>
+      )}
+
+      {reconciliationResult?.missingPredecessors && reconciliationResult.missingPredecessors.length > 0 && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3.5 text-xs text-amber-900 shadow-sm">
+          <div className="flex items-center gap-2 font-bold text-amber-800">
+            <AlertTriangle className="h-4 w-4 shrink-0" />
+            <span>Missing Relationship Codes ({reconciliationResult.missingPredecessors.length})</span>
+          </div>
+          <p className="mt-1 text-amber-700">
+            Predecessors referenced in XER without corresponding activity: {reconciliationResult.missingPredecessors.join(', ')}.
+          </p>
+        </div>
+      )}
+
       {/* KPI Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <div className="rounded-xl border border-neutral-200 bg-neutral-50 p-3">
@@ -335,14 +391,14 @@ export const XerReconciliationBoard: React.FC<XerReconciliationProps> = ({
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-2 border-b border-neutral-200 pb-2">
+      <div className="flex flex-wrap gap-2 border-b border-neutral-200 pb-2">
         <button
           onClick={() => setActiveTab('activities')}
           className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
             activeTab === 'activities' ? 'bg-neutral-900 text-white' : 'bg-neutral-100 text-neutral-700 hover:bg-neutral-200'
           }`}
         >
-          Activities Diff ({reconciliationResult?.activityDiffs.length ?? 0})
+          Activities ({reconciliationResult?.activityDiffs.length ?? 0})
         </button>
 
         <button
@@ -352,7 +408,34 @@ export const XerReconciliationBoard: React.FC<XerReconciliationProps> = ({
           }`}
         >
           <GitFork className="mr-1 inline h-3 w-3" />
-          Relationships Diff ({reconciliationResult?.relationshipDiffs.length ?? 0})
+          Relationships ({reconciliationResult?.relationshipDiffs.length ?? 0})
+        </button>
+
+        <button
+          onClick={() => setActiveTab('wbs')}
+          className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
+            activeTab === 'wbs' ? 'bg-neutral-900 text-white' : 'bg-neutral-100 text-neutral-700 hover:bg-neutral-200'
+          }`}
+        >
+          WBS ({reconciliationResult?.wbsDiffs?.length ?? 0})
+        </button>
+
+        <button
+          onClick={() => setActiveTab('calendars')}
+          className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
+            activeTab === 'calendars' ? 'bg-neutral-900 text-white' : 'bg-neutral-100 text-neutral-700 hover:bg-neutral-200'
+          }`}
+        >
+          Calendars ({reconciliationResult?.calendarDiffs?.length ?? 0})
+        </button>
+
+        <button
+          onClick={() => setActiveTab('resources')}
+          className={`rounded-lg px-3 py-1.5 text-xs font-semibold ${
+            activeTab === 'resources' ? 'bg-neutral-900 text-white' : 'bg-neutral-100 text-neutral-700 hover:bg-neutral-200'
+          }`}
+        >
+          Resources &amp; Assignments ({(reconciliationResult?.resourceDiffs?.length ?? 0) + (reconciliationResult?.assignmentDiffs?.length ?? 0)})
         </button>
 
         <button
@@ -361,7 +444,7 @@ export const XerReconciliationBoard: React.FC<XerReconciliationProps> = ({
             activeTab === 'actuals' ? 'bg-neutral-900 text-white' : 'bg-neutral-100 text-neutral-700 hover:bg-neutral-200'
           }`}
         >
-          Actuals Governance ({reconciliationResult?.activityDiffs.filter(a => a.preservedActuals).length ?? 0})
+          Actuals Protected ({reconciliationResult?.activityDiffs.filter(a => a.preservedActuals).length ?? 0})
         </button>
       </div>
 
@@ -377,6 +460,7 @@ export const XerReconciliationBoard: React.FC<XerReconciliationProps> = ({
                   <th className="p-3">Local Duration / Dates</th>
                   <th className="p-3">Difference Status</th>
                   <th className="p-3">Governed Action</th>
+                  <th className="p-3">Reason</th>
                 </>
               )}
               {activeTab === 'relationships' && (
@@ -386,6 +470,38 @@ export const XerReconciliationBoard: React.FC<XerReconciliationProps> = ({
                   <th className="p-3">Local Link / Lag</th>
                   <th className="p-3">Successor</th>
                   <th className="p-3">Status</th>
+                  <th className="p-3">Action</th>
+                  <th className="p-3">Reason</th>
+                </>
+              )}
+              {activeTab === 'wbs' && (
+                <>
+                  <th className="p-3">WBS Code</th>
+                  <th className="p-3">WBS Name</th>
+                  <th className="p-3">Parent Code</th>
+                  <th className="p-3">Status</th>
+                  <th className="p-3">Action</th>
+                  <th className="p-3">Reason</th>
+                </>
+              )}
+              {activeTab === 'calendars' && (
+                <>
+                  <th className="p-3">Calendar Code</th>
+                  <th className="p-3">Calendar Name</th>
+                  <th className="p-3">Hours / Day</th>
+                  <th className="p-3">Status</th>
+                  <th className="p-3">Action</th>
+                  <th className="p-3">Reason</th>
+                </>
+              )}
+              {activeTab === 'resources' && (
+                <>
+                  <th className="p-3">Item Type</th>
+                  <th className="p-3">Code / Task</th>
+                  <th className="p-3">Details / Name</th>
+                  <th className="p-3">Planned Qty / Cost</th>
+                  <th className="p-3">Action</th>
+                  <th className="p-3">Reason</th>
                 </>
               )}
               {activeTab === 'actuals' && (
@@ -395,6 +511,7 @@ export const XerReconciliationBoard: React.FC<XerReconciliationProps> = ({
                   <th className="p-3">Local Actual Start/Finish</th>
                   <th className="p-3">Local Actual Qty/Cost</th>
                   <th className="p-3">Governance Rule</th>
+                  <th className="p-3">Reason</th>
                 </>
               )}
             </tr>
@@ -429,10 +546,14 @@ export const XerReconciliationBoard: React.FC<XerReconciliationProps> = ({
                   <span className={`text-[11px] font-semibold ${
                     row.action === 'update_refresh' ? 'text-indigo-700' :
                     row.action === 'insert' ? 'text-emerald-700' :
+                    row.action === 'conflict_flag' ? 'text-red-700' :
                     'text-neutral-500'
                   }`}>
                     {row.action === 'update_refresh' ? 'Planning Refresh (Actuals Kept)' : row.action}
                   </span>
+                </td>
+                <td className="p-3 text-[11px] text-neutral-600 max-w-xs truncate">
+                  {row.reason || 'Standard governed evaluation'}
                 </td>
               </tr>
             ))}
@@ -445,13 +566,106 @@ export const XerReconciliationBoard: React.FC<XerReconciliationProps> = ({
                 <td className="p-3 font-mono font-bold">{row.succCode}</td>
                 <td className="p-3 font-semibold">
                   <span className={`rounded-full px-2 py-0.5 text-[10px] ${
-                    row.status === 'matched' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                    row.status === 'matched' ? 'bg-emerald-100 text-emerald-800' :
+                    row.status === 'conflict' ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-800'
                   }`}>
                     {row.status}
                   </span>
                 </td>
+                <td className="p-3 font-medium">
+                  <span className={`text-[11px] font-semibold ${
+                    row.action === 'conflict_flag' ? 'text-red-700' :
+                    row.action === 'insert' ? 'text-emerald-700' : 'text-neutral-600'
+                  }`}>
+                    {row.action}
+                  </span>
+                </td>
+                <td className="p-3 text-[11px] text-neutral-600">
+                  {row.reason}
+                </td>
               </tr>
             ))}
+
+            {activeTab === 'wbs' && (reconciliationResult?.wbsDiffs || []).map((row, idx) => (
+              <tr key={`wbs-${row.wbsCode}-${idx}`} className="hover:bg-neutral-50">
+                <td className="p-3 font-mono font-bold">{row.wbsCode}</td>
+                <td className="p-3 font-medium text-neutral-800">{row.wbsName}</td>
+                <td className="p-3 font-mono text-neutral-600">{row.parentCode || '— (Root)'}</td>
+                <td className="p-3">
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                    row.status === 'synced' ? 'bg-emerald-100 text-emerald-800' : 'bg-purple-100 text-purple-800'
+                  }`}>
+                    {row.status}
+                  </span>
+                </td>
+                <td className="p-3 font-medium text-[11px]">
+                  <span className={row.action === 'insert' ? 'text-emerald-700 font-semibold' : 'text-neutral-600'}>
+                    {row.action}
+                  </span>
+                </td>
+                <td className="p-3 text-[11px] text-neutral-600">
+                  {row.reason}
+                </td>
+              </tr>
+            ))}
+
+            {activeTab === 'calendars' && (reconciliationResult?.calendarDiffs || []).map((row, idx) => (
+              <tr key={`cal-${row.calendarCode}-${idx}`} className="hover:bg-neutral-50">
+                <td className="p-3 font-mono font-bold">{row.calendarCode}</td>
+                <td className="p-3 font-medium text-neutral-800">{row.calendarName}</td>
+                <td className="p-3 font-semibold">{row.hoursPerDay} hrs/day</td>
+                <td className="p-3">
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                    row.status === 'synced' ? 'bg-emerald-100 text-emerald-800' : 'bg-purple-100 text-purple-800'
+                  }`}>
+                    {row.status}
+                  </span>
+                </td>
+                <td className="p-3 font-medium text-[11px]">
+                  <span className={row.action === 'insert' ? 'text-emerald-700 font-semibold' : 'text-neutral-600'}>
+                    {row.action}
+                  </span>
+                </td>
+                <td className="p-3 text-[11px] text-neutral-600">
+                  {row.reason}
+                </td>
+              </tr>
+            ))}
+
+            {activeTab === 'resources' && (
+              <>
+                {(reconciliationResult?.resourceDiffs || []).map((row, idx) => (
+                  <tr key={`res-${row.resourceCode}-${idx}`} className="hover:bg-neutral-50">
+                    <td className="p-3 font-semibold text-neutral-600">Resource Master</td>
+                    <td className="p-3 font-mono font-bold text-neutral-900">{row.resourceCode}</td>
+                    <td className="p-3 font-medium text-neutral-800">{row.resourceName} ({row.resourceType})</td>
+                    <td className="p-3 font-mono text-neutral-500">—</td>
+                    <td className="p-3 font-medium text-[11px]">
+                      <span className={row.action === 'insert' ? 'text-emerald-700 font-semibold' : 'text-neutral-600'}>
+                        {row.action}
+                      </span>
+                    </td>
+                    <td className="p-3 text-[11px] text-neutral-600">{row.reason}</td>
+                  </tr>
+                ))}
+                {(reconciliationResult?.assignmentDiffs || []).map((row, idx) => (
+                  <tr key={`asgn-${row.activityCode}-${row.resourceCode}-${idx}`} className="hover:bg-neutral-50">
+                    <td className="p-3 font-semibold text-indigo-600">Assignment</td>
+                    <td className="p-3 font-mono text-neutral-900">Task: {row.activityCode}</td>
+                    <td className="p-3 font-medium text-neutral-800">Resource: {row.resourceCode}</td>
+                    <td className="p-3 font-mono text-neutral-700">
+                      {row.plannedHours} hrs | ${row.plannedCost}
+                    </td>
+                    <td className="p-3 font-medium text-[11px]">
+                      <span className={row.action === 'insert' ? 'text-emerald-700 font-semibold' : 'text-neutral-600'}>
+                        {row.action}
+                      </span>
+                    </td>
+                    <td className="p-3 text-[11px] text-neutral-600">{row.reason}</td>
+                  </tr>
+                ))}
+              </>
+            )}
 
             {activeTab === 'actuals' && reconciliationResult?.activityDiffs.filter(a => a.preservedActuals).map(row => (
               <tr key={`act-${row.activityCode}`} className="hover:bg-neutral-50">
@@ -466,6 +680,9 @@ export const XerReconciliationBoard: React.FC<XerReconciliationProps> = ({
                 <td className="p-3 text-emerald-800 font-semibold text-[11px]">
                   Protected — Actuals Frozen
                 </td>
+                <td className="p-3 text-[11px] text-neutral-600">
+                  {row.reason}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -473,7 +690,7 @@ export const XerReconciliationBoard: React.FC<XerReconciliationProps> = ({
 
         {!reconciliationResult && (
           <div className="p-10 text-center text-xs text-neutral-500">
-            Select a Project & Main Contract and load a Primavera XER or P6 schedule file to perform governed reconciliation.
+            Select a Project &amp; Main Contract and load a Primavera XER or P6 schedule file to perform governed reconciliation.
           </div>
         )}
       </div>

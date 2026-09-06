@@ -136,6 +136,11 @@ export interface ControlAccount {
   control_account_code: string;
   control_account_code_locked: boolean;
   description: string;
+  title?: string;
+  budget_amount?: number;
+  target_cost?: number;
+  target_start_date?: string | null;
+  target_finish_date?: string | null;
   /** Report cut-off used for this account's PV/EV/AC/forecast view. */
   data_date?: string | null;
   status: 'Active' | 'Inactive' | 'Closed' | string;
@@ -1512,5 +1517,120 @@ export interface DelayEvent {
   time_impact_analysis: TimeImpactAnalysis;
   notes: string;
 }
+
+export type CostPlanStatus = 'Draft' | 'Approved' | 'Superseded';
+export type DeliveryCostCurveType = 'Linear' | 'Front-loaded' | 'Back-loaded' | 'Bell' | 'S-Curve' | 'Manual';
+export type CurveDistributionType = DeliveryCostCurveType;
+
+export interface CostPlanPeriod {
+  id: string;
+  version_id: string;
+  period_index: number;
+  period_start: string;
+  period_end: string;
+  planned_cost: number;
+  cumulative_cost: number;
+  weight_pct: number;
+  distribution_source: DeliveryCostCurveType;
+  is_closed_period: boolean;
+  actual_cost?: number;
+  notes?: string;
+  created_at?: string;
+}
+
+export interface CostPlanVersion {
+  id: string;
+  created_at: string;
+  updated_at: string;
+  project_id: string;
+  contract_id: string;
+  control_account_id: string;
+  wbs_id?: string | null;
+  cost_code_id?: string | null;
+  contract_sov_line_id?: string | null;
+  boq_item_id?: string | null;
+  version_code: string;
+  version_name: string;
+  revision_number: number;
+  status: CostPlanStatus;
+  data_date: string;
+  delivery_cost_bac: number;
+  curve_type: DeliveryCostCurveType;
+  start_date: string;
+  end_date: string;
+  periods_count: number;
+  owner: string;
+  reason: string;
+  approved_by?: string | null;
+  approved_at?: string | null;
+  periods: CostPlanPeriod[];
+  notes?: string;
+  payload?: string;
+}
+
+export interface CostPlanComparisonResult {
+  baseVersion: CostPlanVersion;
+  comparisonVersion: CostPlanVersion;
+  totalBacDelta: number;
+  delta_bac: number;
+  delta_bac_pct: number;
+  delta_cumulative_at_data_date: number;
+  max_period_delta: number;
+  shift_direction: 'front-loaded' | 'back-loaded' | 'neutral' | string;
+  period_comparisons: Array<{
+    period_start: string;
+    period_end: string;
+    v1_planned: number;
+    v2_planned: number;
+    delta_planned: number;
+    v1_cumulative: number;
+    v2_cumulative: number;
+    delta_cumulative: number;
+  }>;
+  periodsDelta: Array<{
+    periodIndex: number;
+    periodStart: string;
+    periodEnd: string;
+    basePlannedCost: number;
+    comparisonPlannedCost: number;
+    deltaCost: number;
+    baseCumulativeCost: number;
+    comparisonCumulativeCost: number;
+    cumulativeDelta: number;
+  }>;
+  peakPeriodDelta: {
+    periodIndex: number;
+    deltaCost: number;
+  };
+}
+
+export interface CostPlanRollupPeriod {
+  period_start: string;
+  period_end: string;
+  planned_cost: number;
+  cumulative_cost: number;
+}
+
+export interface CostPlanRollupGroup {
+  group_id: string;
+  total_bac: number;
+  periods: CostPlanRollupPeriod[];
+}
+
+export type CostPlanRollupSummary = CostPlanRollupGroup[] & {
+  projectId?: string;
+  contractId?: string;
+  dataDate?: string;
+  totalDeliveryCostBac?: number;
+  controlAccountCount?: number;
+  byWbs?: Record<string, { wbsId: string; wbsCode: string; wbsName: string; totalCost: number; periods: Record<string, number> }>;
+  byCostCode?: Record<string, { costCodeId: string; code: string; title: string; totalCost: number; periods: Record<string, number> }>;
+  timeline?: Array<{
+    periodStart: string;
+    periodEnd: string;
+    plannedCost: number;
+    cumulativeCost: number;
+  }>;
+};
 
 

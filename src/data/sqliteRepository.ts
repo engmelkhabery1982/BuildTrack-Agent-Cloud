@@ -22,6 +22,7 @@ const TABLES = new Set([
   "cost_codes", "wbs_nodes", "contract_sov_lines", "control_accounts", "payment_certificates",
   "cost_changes", "procurement_receipts", "supplier_invoices", "supplier_invoice_lines", "supplier_invoice_payments",
   "progress_corrections", "schedule_versions", "delay_events",
+  "cost_plan_versions", "cost_plan_periods",
 ]);
 
 const CONTROL_ACCOUNT_SOURCE_TABLES = new Set([
@@ -155,6 +156,33 @@ export class SqliteRepository implements DataRepository {
         time_impact_analysis: JSON.parse(stored.time_impact_analysis || '{}'),
         notes: stored.notes || '',
         updated_at: stored.updated_at,
+      });
+    } else if (tableName === 'cost_plan_versions') {
+      Object.assign(payload, {
+        project_id: stored.project_id,
+        contract_id: stored.contract_id,
+        control_account_id: (stored as any).control_account_id,
+        wbs_id: (stored as any).wbs_id,
+        cost_code_id: (stored as any).cost_code_id,
+        contract_sov_line_id: (stored as any).contract_sov_line_id,
+        boq_item_id: stored.boq_item_id,
+        version_code: stored.version_code,
+        version_name: stored.version_name,
+        revision_number: (stored as any).revision_number,
+        status: stored.status,
+        data_date: (stored as any).data_date,
+        delivery_cost_bac: (stored as any).delivery_cost_bac,
+        curve_type: (stored as any).curve_type,
+        start_date: (stored as any).start_date,
+        end_date: (stored as any).end_date,
+        periods_count: (stored as any).periods_count,
+        owner: (stored as any).owner,
+        reason: (stored as any).reason,
+        approved_by: (stored as any).approved_by,
+        approved_at: (stored as any).approved_at,
+        notes: stored.notes || '',
+        updated_at: (stored as any).updated_at,
+        periods: payload.periods || [],
       });
     }
     return payload as T;
@@ -372,6 +400,69 @@ export class SqliteRepository implements DataRepository {
           record.notes || '', JSON.stringify(record),
         ],
       );
+    } else if (tableName === "cost_plan_versions") {
+      if (!record.project_id) throw new Error('Cost plan requires a valid project_id.');
+      if (!record.contract_id) throw new Error('Cost plan requires a valid contract_id.');
+      if (!record.control_account_id) throw new Error('Cost plan requires a valid control_account_id.');
+      if (!record.delivery_cost_bac || Number(record.delivery_cost_bac) <= 0) {
+        throw new Error('Cost plan requires a positive Delivery Cost BAC.');
+      }
+      if (record.status === 'Approved') {
+        await database.execute(
+          `UPDATE cost_plan_versions SET status = 'Superseded', updated_at = CURRENT_TIMESTAMP
+           WHERE project_id = $1 AND contract_id = $2 AND control_account_id = $3 AND status = 'Approved'`,
+          [record.project_id, record.contract_id, record.control_account_id]
+        );
+      }
+      await database.execute(
+        `INSERT INTO cost_plan_versions (
+          id, created_at, updated_at, project_id, contract_id, control_account_id,
+          wbs_id, cost_code_id, contract_sov_line_id, boq_item_id,
+          version_code, version_name, revision_number, status, data_date,
+          delivery_cost_bac, curve_type, start_date, end_date, periods_count,
+          owner, reason, approved_by, approved_at, notes, payload
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26)`,
+        [
+          record.id, record.created_at, record.updated_at || now,
+          record.project_id, record.contract_id, record.control_account_id,
+          nullableId(record.wbs_id), nullableId(record.cost_code_id),
+          nullableId(record.contract_sov_line_id), nullableId(record.boq_item_id),
+          record.version_code, record.version_name || record.version_code,
+          Number(record.revision_number) || 1, record.status || 'Draft',
+          record.data_date, Number(record.delivery_cost_bac),
+          record.curve_type || 'Linear', record.start_date, record.end_date,
+          Number(record.periods_count) || (record.periods?.length || 1),
+          record.owner || '', record.reason || '',
+          record.approved_by || null, record.approved_at || null,
+          record.notes || '', JSON.stringify(record),
+        ]
+      );
+      if (Array.isArray(record.periods)) {
+        for (const p of record.periods) {
+          await database.execute(
+            `INSERT OR REPLACE INTO cost_plan_periods (
+              id, version_id, period_index, period_start, period_end,
+              planned_cost, cumulative_cost, weight_pct, distribution_source,
+              is_closed_period, actual_cost, notes, created_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+            [
+              p.id || `${record.id}-p-${p.period_index}`,
+              record.id,
+              Number(p.period_index),
+              p.period_start,
+              p.period_end,
+              Number(p.planned_cost) || 0,
+              Number(p.cumulative_cost) || 0,
+              Number(p.weight_pct) || 0,
+              p.distribution_source || record.curve_type || 'Linear',
+              p.is_closed_period ? 1 : 0,
+              Number(p.actual_cost) || 0,
+              p.notes || '',
+              p.created_at || now,
+            ]
+          );
+        }
+      }
     } else if (tableName === "progress_corrections") {
       await database.execute(
         `INSERT INTO progress_corrections (id, created_at, project_id, contract_id, boq_header_id, boq_item_id, original_wir_id, payload)
@@ -517,6 +608,77 @@ export class SqliteRepository implements DataRepository {
           record.notes || '', record.updated_at, JSON.stringify(record), id,
         ],
       );
+    } else if (tableName === "cost_plan_versions") {
+      record.updated_at = new Date().toISOString();
+      const existingRows = await database.select<StoredRow[]>(
+        `SELECT * FROM cost_plan_versions WHERE id = $1`, [id]
+      );
+      if (existingRows[0]) {
+        if (existingRows[0].status === 'Superseded') {
+          throw new Error('Superseded cost plan versions are permanently locked.');
+        }
+        if (existingRows[0].status === 'Approved' && record.status !== 'Superseded') {
+          throw new Error('Approved cost plan versions are immutable control points and may only transition to Superseded.');
+        }
+      }
+      if (record.status === 'Approved') {
+        await database.execute(
+          `UPDATE cost_plan_versions SET status = 'Superseded', updated_at = CURRENT_TIMESTAMP
+           WHERE project_id = $1 AND contract_id = $2 AND control_account_id = $3 AND status = 'Approved' AND id <> $4`,
+          [record.project_id, record.contract_id, record.control_account_id, id]
+        );
+      }
+      await database.execute(
+        `UPDATE cost_plan_versions SET
+          project_id = $1, contract_id = $2, control_account_id = $3, wbs_id = $4,
+          cost_code_id = $5, contract_sov_line_id = $6, boq_item_id = $7,
+          version_code = $8, version_name = $9, revision_number = $10,
+          status = $11, data_date = $12, delivery_cost_bac = $13, curve_type = $14,
+          start_date = $15, end_date = $16, periods_count = $17,
+          owner = $18, reason = $19, approved_by = $20, approved_at = $21,
+          notes = $22, updated_at = $23, payload = $24
+         WHERE id = $25`,
+        [
+          record.project_id, record.contract_id, record.control_account_id,
+          nullableId(record.wbs_id), nullableId(record.cost_code_id),
+          nullableId(record.contract_sov_line_id), nullableId(record.boq_item_id),
+          record.version_code, record.version_name || record.version_code,
+          Number(record.revision_number) || 1,
+          record.status, record.data_date, Number(record.delivery_cost_bac),
+          record.curve_type, record.start_date, record.end_date,
+          Number(record.periods_count) || (record.periods?.length || 1),
+          record.owner || '', record.reason || '',
+          record.approved_by || null, record.approved_at || null,
+          record.notes || '', record.updated_at, JSON.stringify(record), id,
+        ]
+      );
+      if (Array.isArray(record.periods)) {
+        await database.execute(`DELETE FROM cost_plan_periods WHERE version_id = $1`, [id]);
+        for (const p of record.periods) {
+          await database.execute(
+            `INSERT INTO cost_plan_periods (
+              id, version_id, period_index, period_start, period_end,
+              planned_cost, cumulative_cost, weight_pct, distribution_source,
+              is_closed_period, actual_cost, notes, created_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+            [
+              p.id || `${id}-p-${p.period_index}`,
+              id,
+              Number(p.period_index),
+              p.period_start,
+              p.period_end,
+              Number(p.planned_cost) || 0,
+              Number(p.cumulative_cost) || 0,
+              Number(p.weight_pct) || 0,
+              p.distribution_source || record.curve_type || 'Linear',
+              p.is_closed_period ? 1 : 0,
+              Number(p.actual_cost) || 0,
+              p.notes || '',
+              p.created_at || record.updated_at,
+            ]
+          );
+        }
+      }
     } else if (tableName === "progress_corrections") {
       await database.execute(
         `UPDATE progress_corrections
@@ -559,6 +721,11 @@ export class SqliteRepository implements DataRepository {
   async delete(tableName: string, id: string): Promise<void> {
     assertKnownTable(tableName);
     const existing = this.unpack<Record<string, any>>(await this.findStored(id, tableName), tableName);
+    if (tableName === 'cost_plan_versions') {
+      if (['Approved', 'Superseded'].includes(existing.status)) {
+        throw new Error('Approved or Superseded cost plan versions cannot be deleted.');
+      }
+    }
     const database = await this.database();
     await this.assertReportingPeriodMutationAllowed(database, 'delete', tableName, undefined, existing);
     await database.execute(`DELETE FROM ${tableName} WHERE id = $1`, [id]);
