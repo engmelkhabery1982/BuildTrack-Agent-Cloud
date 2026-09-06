@@ -16,6 +16,7 @@ import { PreferencesPanel, type WorkspaceMode } from '@/components/PreferencesPa
 import { ResourceCapacityBoard } from '@/components/ResourceCapacityBoard';
 import { ScheduleVersionModal } from '@/components/ScheduleVersionModal';
 import { DelayRegisterModal } from '@/components/DelayRegisterModal';
+import { CostPlanModal } from '@/components/CostPlanModal';
 import { ProjectDataDateProvider, useProjectDataDate } from '@/context/ProjectDataDateContext';
 import type { ViewKey, Project, ScheduleVersion, DelayEvent, WBSNode } from '@/types';
 import { addCalendarDays, addWorkingDays, calendarShiftHours, distributedPlannedValueToDate, reconcileScheduleDistributions, scheduleBudget, schedulePlannedValueToDate, WORK_CALENDARS, workingDaysBetween } from '@/utils/schedulePlanning';
@@ -1050,6 +1051,7 @@ function AppWorkspace() {
   const [loginError, setLoginError] = useState('');
   const [scheduleVersionOpen, setScheduleVersionOpen] = useState(false);
   const [delayRegisterOpen, setDelayRegisterOpen] = useState(false);
+  const [costPlanOpen, setCostPlanOpen] = useState(false);
   const { dataDate: unifiedDataDate } = useProjectDataDate();
   const data = useData();
   const synchronizingLiveSubcontractCosts = useRef(false);
@@ -3834,6 +3836,10 @@ function AppWorkspace() {
           label: 'Migrate Existing Parties',
           title: 'Create master records and link existing contracts and procurement without deleting legacy names.',
           onClick: migrateLegacyParties,
+        } : tableName === 'control_accounts' ? {
+          label: 'Time-phased Cost Phasing',
+          title: 'Govern, phase and distribute control account delivery budgets, manage revisions, and execute CBS rollups.',
+          onClick: () => setCostPlanOpen(true),
         } : undefined}
         secondaryToolbarAction={tableName === 'schedule' ? {
           label: 'Versions & Comparison',
@@ -4352,6 +4358,28 @@ function AppWorkspace() {
           await dataRepository.delete('delay_events', id);
           data.applyLocalMutation('delay_events', { type: 'delete', id });
         }}
+      />
+      <CostPlanModal
+        isOpen={costPlanOpen}
+        onClose={() => setCostPlanOpen(false)}
+        projectId={workspaceProjectId || undefined}
+        projects={data.projects}
+        contracts={data.contracts}
+        controlAccounts={data.controlAccounts}
+        wbsNodes={data.wbsNodes as WBSNode[]}
+        costCodes={data.costCodes}
+        costPlanVersions={data.costPlanVersions}
+        onSaveVersion={async (version) => {
+          if (data.costPlanVersions.some((v) => v.id === version.id)) {
+            const updated = await dataRepository.update<Record<string, any>>('cost_plan_versions', version.id, version);
+            data.applyLocalMutation('cost_plan_versions', { type: 'update', row: updated });
+          } else {
+            const inserted = await dataRepository.insert<Record<string, any>>('cost_plan_versions', version);
+            data.applyLocalMutation('cost_plan_versions', { type: 'insert', row: inserted });
+          }
+          await data.reload();
+        }}
+        dataDate={unifiedDataDate}
       />
       </>
     );

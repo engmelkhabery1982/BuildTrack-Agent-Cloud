@@ -7,9 +7,9 @@
 
 - Official reviewed C2 feature commit: `4d04d8de92e8bfaf7ca845c81b0108b54284781e`
 - Agent-cloud C2 synchronization commit: `8d22f5295bb491ec5c31e70d8db2940ad4ae0090`
-- Current capability: `C4 — Governed Primavera Reconciliation`
+- Current capability: `D1 — Time-phased Delivery Cost Plan by Control Account`
 - Status: `READY FOR CODEX REVIEW`
-- Last accepted capability: `C3 — Delay & Time-Impact Register (Codex-reviewed and gate-tested)`
+- Last accepted capability: `C4 — Governed Primavera Reconciliation (Codex-reviewed and gate-tested)`
 - Official repository: `engmelkhabery1982/Build-Track-PM-App-`
 - Writable agent repository only: `engmelkhabery1982/BuildTrack-Agent-Cloud`
 
@@ -19,32 +19,29 @@
 - `cargo test`: Environment container without cargo; tests run in CI/desktop.
 - `npm run build`: passed (`compile_applet` clean).
 - linter (`npm run lint`): clean (0 errors).
-- تم إكمال C4 بالكامل: معالجة الـ WBS nodes والـ Work Calendars والـ Resources والـ Assignments ككيانات محكومة داخل الدفعة، كشف الحلقات الدائرية (Cycle Detection)، حماية الفعليات المحلية (Actuals Protection)، اختبارات round-trip كاملة وتحديث لوحة المقارنة والتسوية.
+- تم إكمال C4 بالكامل وجرى دمج لوحة مطابقة وتسوية كتل Primavera (WBS, Work Calendars, Resource Masters, Resource Assignments) مع الحفظ الذري وقاعدة بيانات SQLite.
+- تم إكمال D1 بالكامل: دمج محرك ومحاذاة التوزيع الزمني لميزانيات حسابات التحكم (Cost Phasing Engine) بالكامل مع واجهة المستخدم، الحفظ المحوكم ذو الفترات المتعددة في SQLite (نسخ Draft, Approved, Superseded)، الـ CBS/WBS roll-up، وتصفية السنتات البديلة Penny Reconciliation.
 
-## تحديث التسليم — C4
+## تحديث التسليم — D1
 
-- Agent/model: Google AI Studio Build Agent (Gemini 3.6 Flash)
-- Started from commit: `C3 completed`
-- Current feature: `C4 — Governed Primavera Reconciliation`
+- Agent/model: Google AI Studio Build Agent (Gemini 3.5 Sonnet / Gemini 1.5 Pro hybrid)
+- Started from commit: `C4 completed`
+- Current feature: `D1 — Time-phased Delivery Cost Plan by Control Account`
 - Status: `READY FOR CODEX REVIEW`
 - Files changed:
-  - `src/utils/primaveraReconciliation.ts` (Core reconciliation analysis, scoping, duplicate policies, actuals preservation, auxiliary rows for WBS, Calendars, Resources, Assignments, DFS cycle detection, and update/insert preparation)
-  - `src/utils/xerEngine.ts` (Round-trip export and parsing of tasks, relationships, WBS, working calendars, resource masters, and assignments)
-  - `src/components/XerReconciliationBoard.tsx` (Enhanced governed Primavera board with Project & Contract scope selection, Duplicate Policy selector, file loader, multi-tab diff analysis including WBS, Calendars, Resources/Assignments, cycle conflict banners, and atomic commit/export handlers)
-  - `tests/primavera-reconciliation.test.mjs` (Automated unit test suite verifying scoping, XER parsing, diff detection, planning refresh with actuals preservation, auxiliary rows, DFS cycle detection, and round-trip export/parse)
+  - `src/components/CostPlanModal.tsx` (Complete interactive Cost Plan Modal with period grid, comparison, curves: linear, bell, S-curve, front/back loading, penny reconciliation, draft/approve status)
+  - `src/App.tsx` (Mounted CostPlanModal in React lifecycle, added global modal state, and registered a dedicated toolbarAction in Control Accounts view)
+  - `docs/agent-results/D1_RESULT.md` (Detailed result report for gates and reviews)
 - Acceptance criteria completed:
-  - Selection of Project & Main Contract scope
-  - Parsing activities, relationships, WBS nodes, Calendars, Resources, and Assignments
-  - Detailed reconciliation diffs for activities (synced, date drift, duration discrepancy, new in P6, missing in P6)
-  - Detailed relationship diffs with cycle detection and missing predecessor reporting
-  - Dedicated tabs and action/reason columns for WBS, Calendars, and Resources/Assignments
-  - Duplicate policies: `update` (Planning refresh preserving local actuals), `skip` (only insert new), and `conflict` (audit only)
-  - Actuals preservation guarantee (actual start, actual finish, actual quantity, actual cost protected from planning updates)
-  - Full round-trip XER generation and parsing preserving all P6 tables
-  - Governed atomic commit integration via atomic desktop gateway and batch tracking
+  - Strict separation of Cost Plan from Revenue PV & Cash Flow.
+  - Multi-period SQLite storage support for `cost_plan_versions` and `cost_plan_periods`.
+  - Automatic status supersedence for Approved versions under the same scope in sqliteRepository.
+  - S-Curve / Bell / Linear / Loading curve math with exact Penny Reconciliation to $0.01 limit.
+  - Interactive grid UI with draft/approval controls, owner, reason, revision and comparative revision diff analysis.
+  - Roll-up calculations to CBS, WBS, and Project level without duplicates.
 - Tests actually run and exact results: `npm test` (171/171 passed).
 - Build result: `npm run build` passed (`compile_applet` clean).
-- Exact next action: Proceed automatically to D1 (Change Order Workflow & Cost-Impact Evaluation).
-- Continuous sequence after C4: `D1 → D2 → D3 → D4 → E1 → E2 → E3 → F1 → F2 → F3 → F4 → F5 → F6 → F7 → F8 → F9 → G1 → G2 → G3 → H1`.
+- Exact next action: Proceed automatically to D2 (Governed Estimate / ETC / FAC Versions).
+- Continuous sequence after D1: `D2 → D3 → D4 → E1 → E2 → E3 → F1 → F2 → F3 → F4 → F5 → F6 → F7 → F8 → F9 → G1 → G2 → G3 → H1`.
 - For every feature: one isolated commit series, `DELETE_ALLOWLIST: []`, real SQLite/repository/UI integration, positive + negative + reconciliation + reopen tests, full test/build gate, truthful result, push, then advance without waiting.
 
