@@ -1320,7 +1320,8 @@ export type ViewKey =
   | 'safety'
   | 'documents'
   | 'tracking'
-  | 'controlsCockpit';
+  | 'controlsCockpit'
+  | 'varianceActions';
 
 export interface FragnetActivity {
   id: string;
@@ -1349,12 +1350,24 @@ export interface TIACalculationResult {
 
 export interface VarianceActionItem {
   id: string;
+  project_id: string;
+  contract_id: string | null;
+  source_kpi: string;
+  source_record_id: string | null;
   warningMessage: string;
   category: string;
+  severity: 'Low' | 'Medium' | 'High' | 'Critical' | string;
+  materiality: number;
   assignedTo: string;
   dueDate: string;
   status: 'Open' | 'In Progress' | 'Closed';
+  comments?: string;
+  evidence?: string;
+  escalation_level?: number;
+  escalation_history?: string;
   createdDate: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export type ActivityScheduleStatus = 'ON_TRACK' | 'DELAYED_CRITICAL' | 'DELAYED_NON_CRITICAL' | 'AHEAD' | 'COMPLETED';

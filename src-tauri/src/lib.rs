@@ -2404,6 +2404,17 @@ pub fn run() {
       BEFORE DELETE ON estimate_versions
       WHEN OLD.status IN ('Approved', 'Superseded')
       BEGIN SELECT RAISE(ABORT, 'Approved or Superseded estimate versions cannot be deleted.'); END;
+
+      CREATE TABLE IF NOT EXISTS variance_actions (
+        id TEXT PRIMARY KEY,
+        created_at TEXT NOT NULL,
+        project_id TEXT,
+        contract_id TEXT,
+        payload TEXT NOT NULL,
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE RESTRICT,
+        FOREIGN KEY (contract_id) REFERENCES contracts(id) ON DELETE RESTRICT
+      );
+      CREATE INDEX IF NOT EXISTS idx_variance_actions_project ON variance_actions(project_id);
     "#,
             kind: tauri_plugin_sql::MigrationKind::Up,
         },

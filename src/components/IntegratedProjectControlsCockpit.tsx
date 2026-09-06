@@ -3,12 +3,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Gauge, X, Info, DollarSign, Calendar, AlertTriangle, Layers,
   ShieldAlert, GitBranch, ClipboardCheck,
-  ChevronRight, BarChart2, AlertOctagon
+  ChevronRight, BarChart2, AlertOctagon, CheckCircle2, Plus
 } from 'lucide-react';
 import type {
   Project, Cost, CostEntry, BOQItem, ControlAccount, Schedule, ReportingPeriod,
-  Variation, QualityEntry, RFIEntry, SubmittalEntry, CashFlowEntry
+  Variation, QualityEntry, RFIEntry, SubmittalEntry, CashFlowEntry, VarianceActionItem
 } from '@/types';
+import type { Warning } from '@/utils/varianceActionRegister';
 
 interface IntegratedProjectControlsCockpitProps {
   projects: Project[];
@@ -23,6 +24,18 @@ interface IntegratedProjectControlsCockpitProps {
   rfis: RFIEntry[];
   submittals: SubmittalEntry[];
   cashFlow: CashFlowEntry[];
+  varianceActions?: VarianceActionItem[];
+  onCreateAction?: (
+    warning: Warning,
+    assignedTo: string,
+    dueDate: string,
+    projectId?: string,
+    contractId?: string | null,
+    severity?: 'Low' | 'Medium' | 'High' | 'Critical',
+    materiality?: number,
+    sourceKpi?: string,
+    sourceRecordId?: string | null
+  ) => Promise<any>;
   onNavigate?: (view: any) => void;
 }
 
@@ -55,6 +68,8 @@ export function IntegratedProjectControlsCockpit({
   rfis,
   submittals,
   cashFlow,
+  varianceActions = [],
+  onCreateAction,
   onNavigate
 }: IntegratedProjectControlsCockpitProps) {
   // Core Filter States
@@ -662,6 +677,54 @@ export function IntegratedProjectControlsCockpit({
                     <div className="flex-1">
                       <h5 className="text-xs font-bold text-slate-800">{exc.title}</h5>
                       <p className="text-[11px] text-slate-600 mt-1 font-sans leading-relaxed">{exc.detail}</p>
+                      
+                      {/* Action Register Connection */}
+                      <div className="mt-2 flex items-center gap-2">
+                        {(() => {
+                          const existingAction = varianceActions.find(
+                            (a) => a.source_record_id === exc.id || a.warningMessage === `${exc.title}: ${exc.detail}`
+                          );
+                          if (existingAction) {
+                            return (
+                              <button
+                                type="button"
+                                onClick={() => onNavigate && onNavigate('varianceActions')}
+                                className="px-2 py-0.5 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 rounded font-sans text-[10px] font-bold flex items-center gap-1 transition-colors"
+                              >
+                                <CheckCircle2 className="w-3 h-3" />
+                                مسجل بسجل الانحرافات ({existingAction.status})
+                              </button>
+                            );
+                          }
+                          return (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                if (onCreateAction) {
+                                  await onCreateAction(
+                                    { message: `${exc.title}: ${exc.detail}`, category: exc.dimension, severity: exc.severity },
+                                    'مدير المشروع',
+                                    new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+                                    selectedProjectId,
+                                    null,
+                                    exc.severity === 'Critical' ? 'Critical' : 'High',
+                                    exc.materialityValue,
+                                    exc.dimension,
+                                    exc.id
+                                  );
+                                }
+                                if (onNavigate) {
+                                  onNavigate('varianceActions');
+                                }
+                              }}
+                              className="px-2 py-0.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded font-sans text-[10px] font-bold flex items-center gap-1 shadow-2xs transition-colors"
+                            >
+                              <Plus className="w-3 h-3" />
+                              تحويل إلى إجراء تصحيحي
+                            </button>
+                          );
+                        })()}
+                      </div>
                     </div>
 
                     <div className="shrink-0 mt-0.5">

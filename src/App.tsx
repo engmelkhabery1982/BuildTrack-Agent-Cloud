@@ -21,6 +21,8 @@ import { EstimateForecastModal } from '@/components/EstimateForecastModal';
 import { CommitmentReconciliationModal } from '@/components/CommitmentReconciliationModal';
 import { CostVarianceDrillDownModal } from '@/components/CostVarianceDrillDownModal';
 import { IntegratedProjectControlsCockpit } from '@/components/IntegratedProjectControlsCockpit';
+import { VarianceActionRegisterView } from '@/components/VarianceActionRegisterView';
+import { useVarianceActions } from '@/hooks/useVarianceActions';
 import { ProjectDataDateProvider, useProjectDataDate } from '@/context/ProjectDataDateContext';
 import type { ViewKey, Project, ScheduleVersion, DelayEvent, WBSNode } from '@/types';
 import { addCalendarDays, addWorkingDays, calendarShiftHours, distributedPlannedValueToDate, reconcileScheduleDistributions, scheduleBudget, schedulePlannedValueToDate, WORK_CALENDARS, workingDaysBetween } from '@/utils/schedulePlanning';
@@ -95,6 +97,7 @@ const NAV_ITEMS: { key: ViewKey; label: string; icon: IconType; group: string }[
   { key: 'laborDuty', label: 'Labor Duty', icon: HardHat, group: 'Cost & Resources' },
   { key: 'equipment', label: 'Equipment', icon: Wrench, group: 'Cost & Resources' },
   { key: 'tasks', label: 'Tasks & Actions', icon: CheckSquare, group: 'Field & Governance' },
+  { key: 'varianceActions', label: 'Variance Action Register', icon: ShieldAlert, group: 'Field & Governance' },
   { key: 'governance', label: 'Risk, Issue & Decision Register', icon: ShieldAlert, group: 'Field & Governance' },
   { key: 'approvals', label: 'Approvals', icon: ClipboardCheck, group: 'Field & Governance' },
   { key: 'auditLog', label: 'Audit Trail', icon: FileCheck2, group: 'Field & Governance' },
@@ -1062,6 +1065,12 @@ function AppWorkspace() {
   const [costVarianceDrillDownOpen, setCostVarianceDrillDownOpen] = useState(false);
   const { dataDate: unifiedDataDate } = useProjectDataDate();
   const data = useData();
+  const {
+    varianceActionItems,
+    handleCreateAction,
+    handleUpdateActionStatus,
+    handleEscalateAction,
+  } = useVarianceActions(data.varianceActions, data.applyLocalMutation);
   const synchronizingLiveSubcontractCosts = useRef(false);
   const synchronizingCostControl = useRef(false);
   const synchronizingProjectFinancials = useRef(false);
@@ -2421,6 +2430,23 @@ function AppWorkspace() {
             rfis={data.rfis as any[]}
             submittals={data.submittals as any[]}
             cashFlow={data.cashFlow as any[]}
+            varianceActions={varianceActionItems as any[]}
+            onCreateAction={handleCreateAction}
+            onNavigate={setActiveView}
+          />
+        </div>
+      );
+    }
+
+    if (activeView === 'varianceActions') {
+      return (
+        <div className="h-full overflow-y-auto p-4 sm:p-6 bg-slate-50/50">
+          <VarianceActionRegisterView
+            projects={data.projects as any[]}
+            varianceActions={varianceActionItems as any[]}
+            onCreateAction={handleCreateAction}
+            onUpdateActionStatus={handleUpdateActionStatus}
+            onEscalateAction={handleEscalateAction}
             onNavigate={setActiveView}
           />
         </div>
