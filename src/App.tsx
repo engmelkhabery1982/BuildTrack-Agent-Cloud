@@ -19,6 +19,7 @@ import { DelayRegisterModal } from '@/components/DelayRegisterModal';
 import { CostPlanModal } from '@/components/CostPlanModal';
 import { EstimateForecastModal } from '@/components/EstimateForecastModal';
 import { CommitmentReconciliationModal } from '@/components/CommitmentReconciliationModal';
+import { CostVarianceDrillDownModal } from '@/components/CostVarianceDrillDownModal';
 import { ProjectDataDateProvider, useProjectDataDate } from '@/context/ProjectDataDateContext';
 import type { ViewKey, Project, ScheduleVersion, DelayEvent, WBSNode } from '@/types';
 import { addCalendarDays, addWorkingDays, calendarShiftHours, distributedPlannedValueToDate, reconcileScheduleDistributions, scheduleBudget, schedulePlannedValueToDate, WORK_CALENDARS, workingDaysBetween } from '@/utils/schedulePlanning';
@@ -1056,6 +1057,7 @@ function AppWorkspace() {
   const [costPlanOpen, setCostPlanOpen] = useState(false);
   const [estimateModalOpen, setEstimateModalOpen] = useState(false);
   const [commitmentReconcileOpen, setCommitmentReconcileOpen] = useState(false);
+  const [costVarianceDrillDownOpen, setCostVarianceDrillDownOpen] = useState(false);
   const { dataDate: unifiedDataDate } = useProjectDataDate();
   const data = useData();
   const synchronizingLiveSubcontractCosts = useRef(false);
@@ -3848,6 +3850,10 @@ function AppWorkspace() {
           label: 'Reconcile PO Lifecycle',
           title: 'Analyze and reconcile PO commitments, goods receipts (GRN), supplier invoices, and settled cash payments.',
           onClick: () => setCommitmentReconcileOpen(true),
+        } : tableName === 'costs' ? {
+          label: 'Cost Variance Drill-down',
+          title: 'Analyze budget, commitment, actual, ETC, and FAC variance by WBS, CBS, Vendor, and Period with actionable reasons.',
+          onClick: () => setCostVarianceDrillDownOpen(true),
         } : undefined}
         secondaryToolbarAction={tableName === 'schedule' ? {
           label: 'Versions & Comparison',
@@ -4404,6 +4410,14 @@ function AppWorkspace() {
       <CommitmentReconciliationModal
         isOpen={commitmentReconcileOpen}
         onClose={() => setCommitmentReconcileOpen(false)}
+        selectedProjectId={workspaceProjectId || undefined}
+        onSaved={async () => {
+          await data.reload();
+        }}
+      />
+      <CostVarianceDrillDownModal
+        isOpen={costVarianceDrillDownOpen}
+        onClose={() => setCostVarianceDrillDownOpen(false)}
         selectedProjectId={workspaceProjectId || undefined}
         onSaved={async () => {
           await data.reload();
