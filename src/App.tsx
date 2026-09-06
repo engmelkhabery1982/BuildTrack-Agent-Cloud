@@ -2316,6 +2316,19 @@ function AppWorkspace() {
           contractSovLines={data.contractSovLines as Record<string, any>[]}
           procurement={data.procurement as Record<string, any>[]}
           procurementReceipts={data.procurementReceipts as Record<string, any>[]}
+          reportVersions={data.reportVersions as any[]}
+          onSaveReportVersion={async (version) => {
+            const inserted = await dataRepository.insert<Record<string, any>>('report_versions', version);
+            data.applyLocalMutation('report_versions', { type: 'insert', row: inserted });
+          }}
+          onUpdateReportVersion={async (id, patch) => {
+            const updated = await dataRepository.update<Record<string, any>>('report_versions', id, patch);
+            data.applyLocalMutation('report_versions', { type: 'update', row: updated });
+          }}
+          onDeleteReportVersion={async (id) => {
+            await dataRepository.delete('report_versions', id);
+            data.applyLocalMutation('report_versions', { type: 'delete', id });
+          }}
         />
       );
     }

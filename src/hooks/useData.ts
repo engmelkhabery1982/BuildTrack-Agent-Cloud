@@ -4,7 +4,7 @@ import type {
   Project, Task, Cost, CostEntry, Procurement, ProcurementReceipt, SupplierInvoice, SupplierInvoiceLine, SupplierInvoicePayment, Safety, ProgressEntry,
   Schedule, Contract, BOQHeader, BOQItem, CashFlowEntry, SubcontractorInvoice,
   ClientInvoice, PaymentCertificate, Variation, VariationLine, DocumentEntry, WIREntry, LaborDuty, Equipment, TrackingSheet, ResourceMaster,
-  InvoiceTracking, ScheduleDistribution, ScheduleResourceAssignment, ScheduleVersion, ProjectBaseline, ReportingPeriod, GovernanceRegisterEntry, ApprovalRequest, AuditLogEntry, RFIEntry, SubmittalEntry, QualityEntry, SiteDailyReport, PMOSnapshot, AppUser, Party, PartyContact, RateHistory, ReportTemplate, CostCode, WBSNode, ContractSOVLine, ControlAccount, CostChange, WorkCalendar, ProgressCorrection, DelayEvent, CostPlanVersion, EstimateVersion, VarianceActionItem,
+  InvoiceTracking, ScheduleDistribution, ScheduleResourceAssignment, ScheduleVersion, ProjectBaseline, ReportingPeriod, GovernanceRegisterEntry, ApprovalRequest, AuditLogEntry, RFIEntry, SubmittalEntry, QualityEntry, SiteDailyReport, PMOSnapshot, AppUser, Party, PartyContact, RateHistory, ReportTemplate, ReportVersion, CostCode, WBSNode, ContractSOVLine, ControlAccount, CostChange, WorkCalendar, ProgressCorrection, DelayEvent, CostPlanVersion, EstimateVersion, VarianceActionItem,
 } from '@/types';
 import { syncWirApprovalProgress, evaluateBackToBackPaymentAuthorization } from '@/utils/commercialControl';
 
@@ -64,6 +64,7 @@ export function useData() {
   const [partyContacts, setPartyContacts] = useState<PartyContact[]>([]);
   const [rateHistory, setRateHistory] = useState<RateHistory[]>([]);
   const [reportTemplates, setReportTemplates] = useState<ReportTemplate[]>([]);
+  const [reportVersions, setReportVersions] = useState<ReportVersion[]>([]);
   const [costCodes, setCostCodes] = useState<CostCode[]>([]);
   const [wbsNodes, setWbsNodes] = useState<WBSNode[]>([]);
   const [contractSovLines, setContractSovLines] = useState<ContractSOVLine[]>([]);
@@ -90,7 +91,7 @@ export function useData() {
 
     try {
       const [
-        p, t, c, ce, pr, prec, supi, supil, supip, s, pg, sc, sd, sra, wc, sv, de, bl, rp, gr, ap, al, rf, su, qu, sdr, sn, us, ct, bh, bq, cf, si, ci, cit, sit, va, vl, dc, wr, pcor, ld, eq, rm, tr, pa, pc, rh, rt, cc, wn, sov, ca, cpv, ev, cchg, pcert, vacts,
+        p, t, c, ce, pr, prec, supi, supil, supip, s, pg, sc, sd, sra, wc, sv, de, bl, rp, gr, ap, al, rf, su, qu, sdr, sn, us, ct, bh, bq, cf, si, ci, cit, sit, va, vl, dc, wr, pcor, ld, eq, rm, tr, pa, pc, rh, rt, rver, cc, wn, sov, ca, cpv, ev, cchg, pcert, vacts,
       ] = await Promise.all([
         dataRepository.list<Project>('projects'),
         dataRepository.list<Task>('tasks'),
@@ -139,6 +140,7 @@ export function useData() {
         listOptional<PartyContact>('party_contacts'),
         listOptional<RateHistory>('rate_history'),
         listOptional<ReportTemplate>('report_templates'),
+        listOptional<ReportVersion>('report_versions'),
         listOptional<CostCode>('cost_codes'), listOptional<WBSNode>('wbs_nodes'), listOptional<ContractSOVLine>('contract_sov_lines'), listOptional<ControlAccount>('control_accounts'), listOptional<CostPlanVersion>('cost_plan_versions'), listOptional<EstimateVersion>('estimate_versions'), listOptional<CostChange>('cost_changes'), listOptional<PaymentCertificate>('payment_certificates'), listOptional<VarianceActionItem>('variance_actions'),
       ]);
 
@@ -185,6 +187,7 @@ export function useData() {
       setTracking(tr);
       setParties(pa); setPartyContacts(pc); setRateHistory(rh);
       setReportTemplates(rt);
+      setReportVersions(rver || []);
       setCostCodes(cc);
       setWbsNodes(wn);
       setContractSovLines(sov);
@@ -352,6 +355,7 @@ export function useData() {
       case 'party_contacts': apply(setPartyContacts); break;
       case 'rate_history': apply(setRateHistory); break;
       case 'report_templates': apply(setReportTemplates); break;
+      case 'report_versions': apply(setReportVersions); break;
       case 'cost_codes': apply(setCostCodes); break;
       case 'wbs_nodes': apply(setWbsNodes); break;
       case 'contract_sov_lines': apply(setContractSovLines); break;
@@ -382,7 +386,7 @@ export function useData() {
     projects, tasks, costs, costEntries, procurement, procurementReceipts, supplierInvoices, supplierInvoiceLines, supplierInvoicePayments, safety, progress, schedules, scheduleDistributions, scheduleResourceAssignments, workCalendars, scheduleVersions, delayEvents, baselines, reportingPeriods, governanceRegister, approvals, auditLog, rfis, submittals, quality, siteDailyReports, snapshots, users,
     contracts, boqHeaders, boqItems, cashFlow, subInvoices, clientInvoices,
     clientInvoiceTracking, subcontractorInvoiceTracking, variations, variationLines,
-    documents, wirEntries, progressCorrections, laborDuty, equipment, resourceMasters, tracking, parties, partyContacts, rateHistory, reportTemplates, costCodes, wbsNodes, contractSovLines, controlAccounts, costPlanVersions, estimateVersions, costChanges, paymentCertificates, varianceActions, loading,
+    documents, wirEntries, progressCorrections, laborDuty, equipment, resourceMasters, tracking, parties, partyContacts, rateHistory, reportTemplates, reportVersions, costCodes, wbsNodes, contractSovLines, controlAccounts, costPlanVersions, estimateVersions, costChanges, paymentCertificates, varianceActions, loading,
     reload: loadAll, applyLocalMutation, reloadInvoiceTracking, syncWirApproval, unlockBackToBackPayments,
   };
 }

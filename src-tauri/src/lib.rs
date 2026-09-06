@@ -2418,6 +2418,23 @@ pub fn run() {
     "#,
             kind: tauri_plugin_sql::MigrationKind::Up,
         },
+        tauri_plugin_sql::Migration {
+            version: 57,
+            description: "add_report_versions",
+            sql: r#"
+      CREATE TABLE IF NOT EXISTS report_versions (
+        id TEXT PRIMARY KEY,
+        created_at TEXT NOT NULL,
+        project_id TEXT,
+        contract_id TEXT,
+        payload TEXT NOT NULL,
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE RESTRICT,
+        FOREIGN KEY (contract_id) REFERENCES contracts(id) ON DELETE RESTRICT
+      );
+      CREATE INDEX IF NOT EXISTS idx_report_versions_project ON report_versions(project_id);
+    "#,
+            kind: tauri_plugin_sql::MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()

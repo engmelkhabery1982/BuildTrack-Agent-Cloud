@@ -24,7 +24,7 @@ const TABLES = new Set([
   "progress_corrections", "schedule_versions", "delay_events",
   "cost_plan_versions", "cost_plan_periods",
   "estimate_versions", "estimate_lines",
-  "variance_actions",
+  "variance_actions", "report_versions",
 ]);
 
 const CONTROL_ACCOUNT_SOURCE_TABLES = new Set([

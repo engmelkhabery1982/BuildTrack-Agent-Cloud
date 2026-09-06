@@ -1136,6 +1136,23 @@ export interface ReportTemplate {
   show_signatures?: boolean;
   created_at: string;
 }
+
+export interface ReportVersion {
+  id: string;
+  project_id: string;
+  data_date: string;
+  pack_type: string;
+  template_id?: string | null;
+  version_code: string;
+  status: 'Draft' | 'Issued' | 'Superseded';
+  snapshot_hash: string;
+  snapshot_payload: string;
+  issuer: string;
+  sign_off_note?: string;
+  issued_at?: string;
+  superseded_by?: string | null;
+  created_at: string;
+}
 export interface BOQItemActivity {
   id: string;
   project_id: string;
