@@ -1633,4 +1633,46 @@ export type CostPlanRollupSummary = CostPlanRollupGroup[] & {
   }>;
 };
 
+export type EstimateStatus = 'Draft' | 'Approved' | 'Superseded';
+export type ForecastMethod = 'Bottom-up' | 'Remaining Budget' | 'CPI' | 'CPI-SPI' | 'Manual';
+
+export interface EstimateLine {
+  id: string;
+  version_id: string;
+  control_account_id: string;
+  planned_value: number;
+  earned_value: number;
+  actual_cost: number;
+  open_commitment: number;
+  etc: number;
+  fac: number;
+  method_used: ForecastMethod;
+  notes?: string;
+  waiver_documented: boolean;
+  waiver_reason?: string;
+}
+
+export interface EstimateVersion {
+  id: string;
+  created_at: string;
+  updated_at: string;
+  project_id: string;
+  contract_id: string;
+  control_account_id: string;
+  version_code: string;
+  version_name: string;
+  revision_number: number;
+  status: EstimateStatus;
+  data_date: string;
+  method: ForecastMethod;
+  owner: string;
+  reason: string;
+  assumptions: string;
+  approved_by?: string | null;
+  approved_at?: string | null;
+  notes?: string;
+  lines: EstimateLine[];
+  payload?: string;
+}
+
 

@@ -17,6 +17,7 @@ import { ResourceCapacityBoard } from '@/components/ResourceCapacityBoard';
 import { ScheduleVersionModal } from '@/components/ScheduleVersionModal';
 import { DelayRegisterModal } from '@/components/DelayRegisterModal';
 import { CostPlanModal } from '@/components/CostPlanModal';
+import { EstimateForecastModal } from '@/components/EstimateForecastModal';
 import { ProjectDataDateProvider, useProjectDataDate } from '@/context/ProjectDataDateContext';
 import type { ViewKey, Project, ScheduleVersion, DelayEvent, WBSNode } from '@/types';
 import { addCalendarDays, addWorkingDays, calendarShiftHours, distributedPlannedValueToDate, reconcileScheduleDistributions, scheduleBudget, schedulePlannedValueToDate, WORK_CALENDARS, workingDaysBetween } from '@/utils/schedulePlanning';
@@ -1052,6 +1053,7 @@ function AppWorkspace() {
   const [scheduleVersionOpen, setScheduleVersionOpen] = useState(false);
   const [delayRegisterOpen, setDelayRegisterOpen] = useState(false);
   const [costPlanOpen, setCostPlanOpen] = useState(false);
+  const [estimateModalOpen, setEstimateModalOpen] = useState(false);
   const { dataDate: unifiedDataDate } = useProjectDataDate();
   const data = useData();
   const synchronizingLiveSubcontractCosts = useRef(false);
@@ -3845,6 +3847,10 @@ function AppWorkspace() {
           label: 'Versions & Comparison',
           title: 'Capture governed schedule versions and compare scope, dates, logic, float, criticality and budget without changing the live schedule.',
           onClick: () => setScheduleVersionOpen(true),
+        } : tableName === 'control_accounts' ? {
+          label: 'Governed Forecasts (EAC/FAC)',
+          title: 'Manage governed forecasts, remaining budgets, and calculation methods with strict floor controls.',
+          onClick: () => setEstimateModalOpen(true),
         } : undefined}
         tertiaryToolbarAction={tableName === 'schedule' || tableName === 'delay_events' ? {
           label: 'Delay & Time-Impact Register',
@@ -4380,6 +4386,14 @@ function AppWorkspace() {
           await data.reload();
         }}
         dataDate={unifiedDataDate}
+      />
+      <EstimateForecastModal
+        isOpen={estimateModalOpen}
+        onClose={() => setEstimateModalOpen(false)}
+        selectedProjectId={workspaceProjectId || undefined}
+        onSaved={async () => {
+          await data.reload();
+        }}
       />
       </>
     );

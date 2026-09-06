@@ -2332,6 +2332,81 @@ pub fn run() {
     "#,
             kind: tauri_plugin_sql::MigrationKind::Up,
         },
+        tauri_plugin_sql::Migration {
+            version: 54,
+            description: "add_estimate_versions_and_lines_governance",
+            sql: r#"
+      CREATE TABLE IF NOT EXISTS estimate_versions (
+        id TEXT PRIMARY KEY,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        project_id TEXT NOT NULL,
+        contract_id TEXT NOT NULL,
+        control_account_id TEXT NOT NULL,
+        version_code TEXT NOT NULL,
+        version_name TEXT NOT NULL,
+        revision_number INTEGER NOT NULL DEFAULT 1,
+        status TEXT NOT NULL CHECK (status IN ('Draft', 'Approved', 'Superseded')),
+        data_date TEXT NOT NULL CHECK (length(data_date) = 10 AND date(data_date, '+0 days') = data_date),
+        method TEXT NOT NULL CHECK (method IN ('Bottom-up', 'Remaining Budget', 'CPI', 'CPI-SPI', 'Manual')),
+        owner TEXT NOT NULL DEFAULT '',
+        reason TEXT NOT NULL DEFAULT '',
+        assumptions TEXT NOT NULL DEFAULT '',
+        approved_by TEXT,
+        approved_at TEXT,
+        notes TEXT NOT NULL DEFAULT '',
+        payload TEXT NOT NULL,
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE RESTRICT,
+        FOREIGN KEY (contract_id) REFERENCES contracts(id) ON DELETE RESTRICT,
+        FOREIGN KEY (control_account_id) REFERENCES control_accounts(id) ON DELETE RESTRICT
+      );
+      CREATE INDEX IF NOT EXISTS idx_estimate_scope ON estimate_versions(project_id, contract_id, control_account_id);
+      CREATE INDEX IF NOT EXISTS idx_estimate_status ON estimate_versions(status);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_estimate_unique_code ON estimate_versions(project_id, contract_id, lower(version_code));
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_estimate_single_approved 
+        ON estimate_versions(project_id, contract_id, control_account_id) 
+        WHERE status = 'Approved';
+
+      CREATE TABLE IF NOT EXISTS estimate_lines (
+        id TEXT PRIMARY KEY,
+        version_id TEXT NOT NULL,
+        control_account_id TEXT NOT NULL,
+        planned_value REAL NOT NULL DEFAULT 0,
+        earned_value REAL NOT NULL DEFAULT 0,
+        actual_cost REAL NOT NULL DEFAULT 0,
+        open_commitment REAL NOT NULL DEFAULT 0,
+        etc REAL NOT NULL DEFAULT 0,
+        fac REAL NOT NULL DEFAULT 0,
+        method_used TEXT NOT NULL,
+        notes TEXT DEFAULT '',
+        waiver_documented INTEGER NOT NULL DEFAULT 0,
+        waiver_reason TEXT DEFAULT '',
+        FOREIGN KEY (version_id) REFERENCES estimate_versions(id) ON DELETE CASCADE,
+        FOREIGN KEY (control_account_id) REFERENCES control_accounts(id) ON DELETE RESTRICT,
+        UNIQUE(version_id, control_account_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_estimate_lines_ver ON estimate_lines(version_id);
+
+      CREATE TRIGGER IF NOT EXISTS estimate_versions_updated_at
+      AFTER UPDATE ON estimate_versions
+      FOR EACH ROW
+      BEGIN
+        UPDATE estimate_versions SET updated_at = CURRENT_TIMESTAMP WHERE id = NEW.id;
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS estimate_version_immutable_update
+      BEFORE UPDATE ON estimate_versions
+      WHEN (OLD.status = 'Superseded')
+        OR (OLD.status = 'Approved' AND NEW.status != 'Superseded')
+      BEGIN SELECT RAISE(ABORT, 'Approved estimate versions are immutable control points and may only transition to Superseded.'); END;
+
+      CREATE TRIGGER IF NOT EXISTS estimate_version_immutable_delete
+      BEFORE DELETE ON estimate_versions
+      WHEN OLD.status IN ('Approved', 'Superseded')
+      BEGIN SELECT RAISE(ABORT, 'Approved or Superseded estimate versions cannot be deleted.'); END;
+    "#,
+            kind: tauri_plugin_sql::MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()

@@ -23,6 +23,7 @@ const TABLES = new Set([
   "cost_changes", "procurement_receipts", "supplier_invoices", "supplier_invoice_lines", "supplier_invoice_payments",
   "progress_corrections", "schedule_versions", "delay_events",
   "cost_plan_versions", "cost_plan_periods",
+  "estimate_versions", "estimate_lines",
 ]);
 
 const CONTROL_ACCOUNT_SOURCE_TABLES = new Set([
@@ -183,6 +184,26 @@ export class SqliteRepository implements DataRepository {
         notes: stored.notes || '',
         updated_at: (stored as any).updated_at,
         periods: payload.periods || [],
+      });
+    } else if (tableName === 'estimate_versions') {
+      Object.assign(payload, {
+        project_id: stored.project_id,
+        contract_id: stored.contract_id,
+        control_account_id: (stored as any).control_account_id,
+        version_code: stored.version_code,
+        version_name: stored.version_name,
+        revision_number: (stored as any).revision_number,
+        status: stored.status,
+        data_date: (stored as any).data_date,
+        method: (stored as any).method,
+        owner: (stored as any).owner,
+        reason: (stored as any).reason,
+        assumptions: (stored as any).assumptions,
+        approved_by: (stored as any).approved_by,
+        approved_at: (stored as any).approved_at,
+        notes: stored.notes || '',
+        updated_at: (stored as any).updated_at,
+        lines: payload.lines || [],
       });
     }
     return payload as T;
@@ -463,6 +484,60 @@ export class SqliteRepository implements DataRepository {
           );
         }
       }
+    } else if (tableName === "estimate_versions") {
+      if (!record.project_id) throw new Error('Estimate requires a valid project_id.');
+      if (!record.contract_id) throw new Error('Estimate requires a valid contract_id.');
+      if (!record.control_account_id) throw new Error('Estimate requires a valid control_account_id.');
+      if (record.status === 'Approved') {
+        await database.execute(
+          `UPDATE estimate_versions SET status = 'Superseded', updated_at = CURRENT_TIMESTAMP
+           WHERE project_id = $1 AND contract_id = $2 AND control_account_id = $3 AND status = 'Approved'`,
+          [record.project_id, record.contract_id, record.control_account_id]
+        );
+      }
+      await database.execute(
+        `INSERT INTO estimate_versions (
+          id, created_at, updated_at, project_id, contract_id, control_account_id,
+          version_code, version_name, revision_number, status, data_date,
+          method, owner, reason, assumptions, approved_by, approved_at, notes, payload
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)`,
+        [
+          record.id, record.created_at, record.updated_at || now,
+          record.project_id, record.contract_id, record.control_account_id,
+          record.version_code, record.version_name || record.version_code,
+          Number(record.revision_number) || 1, record.status || 'Draft',
+          record.data_date, record.method || 'Bottom-up',
+          record.owner || '', record.reason || '', record.assumptions || '',
+          record.approved_by || null, record.approved_at || null,
+          record.notes || '', JSON.stringify(record),
+        ]
+      );
+      if (Array.isArray(record.lines)) {
+        for (const l of record.lines) {
+          await database.execute(
+            `INSERT OR REPLACE INTO estimate_lines (
+              id, version_id, control_account_id, planned_value, earned_value,
+              actual_cost, open_commitment, etc, fac, method_used, notes,
+              waiver_documented, waiver_reason
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+            [
+              l.id || `${record.id}-l-${l.control_account_id}`,
+              record.id,
+              l.control_account_id,
+              Number(l.planned_value) || 0,
+              Number(l.earned_value) || 0,
+              Number(l.actual_cost) || 0,
+              Number(l.open_commitment) || 0,
+              Number(l.etc) || 0,
+              Number(l.fac) || 0,
+              l.method_used || record.method || 'Bottom-up',
+              l.notes || '',
+              l.waiver_documented ? 1 : 0,
+              l.waiver_reason || '',
+            ]
+          );
+        }
+      }
     } else if (tableName === "progress_corrections") {
       await database.execute(
         `INSERT INTO progress_corrections (id, created_at, project_id, contract_id, boq_header_id, boq_item_id, original_wir_id, payload)
@@ -679,6 +754,71 @@ export class SqliteRepository implements DataRepository {
           );
         }
       }
+    } else if (tableName === "estimate_versions") {
+      record.updated_at = new Date().toISOString();
+      const existingRows = await database.select<StoredRow[]>(
+        `SELECT * FROM estimate_versions WHERE id = $1`, [id]
+      );
+      if (existingRows[0]) {
+        if (existingRows[0].status === 'Superseded') {
+          throw new Error('Superseded estimate versions are permanently locked.');
+        }
+        if (existingRows[0].status === 'Approved' && record.status !== 'Superseded') {
+          throw new Error('Approved estimate versions are immutable control points and may only transition to Superseded.');
+        }
+      }
+      if (record.status === 'Approved') {
+        await database.execute(
+          `UPDATE estimate_versions SET status = 'Superseded', updated_at = CURRENT_TIMESTAMP
+           WHERE project_id = $1 AND contract_id = $2 AND control_account_id = $3 AND status = 'Approved' AND id <> $4`,
+          [record.project_id, record.contract_id, record.control_account_id, id]
+        );
+      }
+      await database.execute(
+        `UPDATE estimate_versions SET
+          project_id = $1, contract_id = $2, control_account_id = $3,
+          version_code = $4, version_name = $5, revision_number = $6,
+          status = $7, data_date = $8, method = $9, owner = $10, reason = $11,
+          assumptions = $12, approved_by = $13, approved_at = $14,
+          notes = $15, updated_at = $16, payload = $17
+         WHERE id = $18`,
+        [
+          record.project_id, record.contract_id, record.control_account_id,
+          record.version_code, record.version_name || record.version_code,
+          Number(record.revision_number) || 1,
+          record.status, record.data_date, record.method,
+          record.owner || '', record.reason || '', record.assumptions || '',
+          record.approved_by || null, record.approved_at || null,
+          record.notes || '', record.updated_at, JSON.stringify(record), id,
+        ]
+      );
+      if (Array.isArray(record.lines)) {
+        await database.execute(`DELETE FROM estimate_lines WHERE version_id = $1`, [id]);
+        for (const l of record.lines) {
+          await database.execute(
+            `INSERT INTO estimate_lines (
+              id, version_id, control_account_id, planned_value, earned_value,
+              actual_cost, open_commitment, etc, fac, method_used, notes,
+              waiver_documented, waiver_reason
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+            [
+              l.id || `${id}-l-${l.control_account_id}`,
+              id,
+              l.control_account_id,
+              Number(l.planned_value) || 0,
+              Number(l.earned_value) || 0,
+              Number(l.actual_cost) || 0,
+              Number(l.open_commitment) || 0,
+              Number(l.etc) || 0,
+              Number(l.fac) || 0,
+              l.method_used || record.method || 'Bottom-up',
+              l.notes || '',
+              l.waiver_documented ? 1 : 0,
+              l.waiver_reason || '',
+            ]
+          );
+        }
+      }
     } else if (tableName === "progress_corrections") {
       await database.execute(
         `UPDATE progress_corrections
@@ -721,9 +861,9 @@ export class SqliteRepository implements DataRepository {
   async delete(tableName: string, id: string): Promise<void> {
     assertKnownTable(tableName);
     const existing = this.unpack<Record<string, any>>(await this.findStored(id, tableName), tableName);
-    if (tableName === 'cost_plan_versions') {
+    if (tableName === 'cost_plan_versions' || tableName === 'estimate_versions') {
       if (['Approved', 'Superseded'].includes(existing.status)) {
-        throw new Error('Approved or Superseded cost plan versions cannot be deleted.');
+        throw new Error(`Approved or Superseded ${tableName} cannot be deleted.`);
       }
     }
     const database = await this.database();
