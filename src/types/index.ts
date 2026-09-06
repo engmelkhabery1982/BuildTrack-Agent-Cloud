@@ -1319,7 +1319,8 @@ export type ViewKey =
   | 'dailyReports'
   | 'safety'
   | 'documents'
-  | 'tracking';
+  | 'tracking'
+  | 'controlsCockpit';
 
 export interface FragnetActivity {
   id: string;
