@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { LayoutDashboard, Database, FolderKanban, SquareCheck as CheckSquare, DollarSign, Package, ShieldAlert, TrendingUp, CalendarClock, Signature as FileSignature, ClipboardList, Banknote, Receipt, FileText, GitBranch, FolderOpen, FileCheck as FileCheck2, Building2, Menu, ListOrdered, HardHat, Wrench, ClipboardCheck, Layers, Download, Bell, CircleAlert, BrainCircuit, Maximize2, Minimize2, ArrowLeft, ArrowRight, Users, Gauge, Sliders } from 'lucide-react';
+import { LayoutDashboard, Database, FolderKanban, SquareCheck as CheckSquare, DollarSign, Package, ShieldAlert, TrendingUp, CalendarClock, Signature as FileSignature, ClipboardList, Banknote, Receipt, FileText, GitBranch, FolderOpen, FileCheck as FileCheck2, Building2, Menu, ListOrdered, HardHat, Wrench, ClipboardCheck, Layers, Download, Bell, CircleAlert, BrainCircuit, Maximize2, Minimize2, ArrowLeft, ArrowRight, Users, Gauge, Sliders, Clock } from 'lucide-react';
 import { useData } from '@/hooks/useData';
 import { acceptProcurementReceipt, amendPurchaseOrder, approveCostChange, approveCostPlanVersion, approvePaymentCertificate, approvePurchaseOrder, approveSupplierInvoice, approveVariation, assertBaselineApproval, assertRecordPeriodIsOpen, assertReportingPeriodDefinition, cancelPurchaseOrder, compareBaselineActivities, compareBaselineActivityDetails, compareBaselineRevisions, createBaselineActivitySnapshot, createBaselineDistributionSnapshot, createCodeDraft, dataRepository, issueReportVersion, prepareCodeControlledInsert, reverseCommercialPosting, reverseSupplierApPosting, reverseVariation, settlePaymentCertificate, settleSupplierInvoicePayment, STATUS_SETS, summarizeBaselineSchedule, submitLaborTimesheet, approveLaborTimesheet, postLaborTimesheet, reverseLaborTimesheet, approveEquipmentLog, postEquipmentLog, reverseEquipmentLog } from '@/data';
 import { Dashboard } from '@/components/Dashboard';
@@ -104,7 +104,9 @@ const NAV_ITEMS: { key: ViewKey; label: string; icon: IconType; group: string }[
   { key: 'resourceLeveling', label: 'Resource Leveling Register', icon: Sliders, group: 'Planning & Controls' },
   { key: 'resourceAssignments', label: 'Planned Resource Assignments', icon: Users, group: 'Planning & Controls' },
   { key: 'laborDuty', label: 'Labor Duty', icon: HardHat, group: 'Cost & Resources' },
+  { key: 'laborTimesheets', label: 'Labor Timesheets', icon: Clock, group: 'Cost & Resources' },
   { key: 'equipment', label: 'Equipment', icon: Wrench, group: 'Cost & Resources' },
+  { key: 'equipmentLogs', label: 'Equipment Logs', icon: ClipboardList, group: 'Cost & Resources' },
   { key: 'tasks', label: 'Tasks & Actions', icon: CheckSquare, group: 'Field & Governance' },
   { key: 'varianceActions', label: 'Variance Action Register', icon: ShieldAlert, group: 'Field & Governance' },
   { key: 'governance', label: 'Risk, Issue & Decision Register', icon: ShieldAlert, group: 'Field & Governance' },
@@ -4014,6 +4016,20 @@ function AppWorkspace() {
           label: 'Cost Variance Drill-down',
           title: 'Analyze budget, commitment, actual, ETC, and FAC variance by WBS, CBS, Vendor, and Period with actionable reasons.',
           onClick: () => setCostVarianceDrillDownOpen(true),
+        } : tableName === 'labor_timesheets' ? {
+          label: 'New Labor Timesheet',
+          title: 'Create and govern a new crew timesheet with actual cost calculation.',
+          onClick: () => {
+            setSelectedLaborTimesheet(null);
+            setLaborTimesheetModalOpen(true);
+          },
+        } : tableName === 'equipment_logs' ? {
+          label: 'New Equipment Log',
+          title: 'Create and govern a new equipment shift log and meter readings.',
+          onClick: () => {
+            setSelectedEquipmentLog(null);
+            setEquipmentLogModalOpen(true);
+          },
         } : undefined}
         secondaryToolbarAction={tableName === 'schedule' ? {
           label: 'Versions & Comparison',

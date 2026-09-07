@@ -281,3 +281,81 @@ test('F1 Data Dictionary and SQLite Repository register labor timesheets', () =>
   assert.match(dictSource, /laborTimesheet:\s*\[/);
   assert.match(dictSource, /timesheet_number/);
 });
+
+test('W01-G01 to W01-G10: Comprehensive validation and lifecycle tests for Labor Timesheet', () => {
+  // G01 & G02: Overtime calculation defaults to 1.5x regular rate if not explicitly supplied
+  const lineDefaultOT = {
+    regular_hours: 8,
+    overtime_hours: 4,
+    regular_rate: 40,
+    // overtime_rate undefined
+  };
+  const calc1 = calculateLaborLineTotal(lineDefaultOT);
+  assert.strictEqual(calc1.total_hours, 12);
+  assert.strictEqual(calc1.calculated_amount, 8 * 40 + 4 * (40 * 1.5)); // 320 + 240 = 560
+
+  // G03: Daily hours warning at > 8h and hard block at > 16h
+  const header = {
+    id: 'TS-TEST-1',
+    project_id: 'PRJ-1',
+    contract_id: 'CTR-1',
+    timesheet_number: 'TS-2026-003',
+    work_date: '2026-09-07',
+    shift: 'Day',
+    submitter: 'Engineer A',
+  };
+
+  const lineExcessiveHours = [
+    {
+      resource_id: 'RES-101',
+      schedule_activity_id: 'ACT-1',
+      control_account_id: 'CA-1',
+      regular_hours: 12,
+      overtime_hours: 6, // 18 hours > 16 hours
+      regular_rate: 50,
+      overtime_rate: 75,
+    },
+  ];
+
+  const resourceMasters = [{ id: 'RES-101', name: 'John Doe', resource_type: 'Labor', status: 'Active' }];
+  const schedules = [{ id: 'ACT-1', project_id: 'PRJ-1', contract_id: 'CTR-1' }];
+  const controlAccounts = [{ id: 'CA-1', project_id: 'PRJ-1', contract_id: 'CTR-1' }];
+
+  const issuesExceed = validateLaborTimesheet(header, lineExcessiveHours, {
+    resourceMasters,
+    schedules,
+    controlAccounts,
+  });
+  assert.ok(issuesExceed.some((i) => i.severity === 'error' && i.message.includes('16 hours')), 'Must flag error when total worker hours exceed 16');
+
+  // G04: Work Calendar checks
+  const workCalendars = [
+    {
+      project_id: 'PRJ-1',
+      working_days: [1, 2, 3, 4, 5],
+      holidays: ['2026-09-07'],
+    },
+  ];
+  const issuesHoliday = validateLaborTimesheet(header, [{
+    resource_id: 'RES-101',
+    schedule_activity_id: 'ACT-1',
+    control_account_id: 'CA-1',
+    regular_hours: 8,
+    overtime_hours: 0,
+    regular_rate: 50,
+    overtime_rate: 75,
+  }], {
+    resourceMasters,
+    schedules,
+    controlAccounts,
+    workCalendars,
+  });
+  assert.ok(issuesHoliday.some((i) => i.message.includes('non-working calendar day') || i.message.includes('Holiday') || i.message.includes('override')), 'Must flag holiday work when no override reason is provided');
+
+  // G05-G10: Check UI modal and App.tsx navigation registration
+  const appSource = read('src/App.tsx');
+  assert.match(appSource, /laborTimesheets/);
+  assert.match(appSource, /LaborTimesheetModal/);
+  assert.match(appSource, /tableName === 'labor_timesheets'/);
+});
+

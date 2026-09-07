@@ -231,6 +231,13 @@ async function invokeEquipment<T>(command: string, request: Record<string, unkno
   throw new Error('Tauri desktop backend required for native atomic posting.');
 }
 
+export const submitEquipmentLog = (request: {
+  operationId: string;
+  logId: string;
+  actor: string;
+  submittedAt: string;
+}) => invokeEquipment<EquipmentLogOperationResult>('submit_equipment_log', request);
+
 export const approveEquipmentLog = (request: {
   operationId: string;
   logId: string;

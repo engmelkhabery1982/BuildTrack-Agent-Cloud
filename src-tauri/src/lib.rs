@@ -161,6 +161,15 @@ async fn reverse_labor_timesheet(
 }
 
 #[tauri::command]
+async fn submit_equipment_log(
+    app: tauri::AppHandle,
+    request: equipment_log::SubmitEquipmentLogRequest,
+) -> Result<equipment_log::EquipmentLogOperationResult, String> {
+    let path = app.path().app_config_dir().map_err(|error| error.to_string())?.join("buildtrack.db");
+    equipment_log::submit_equipment_log(&path, request).await
+}
+
+#[tauri::command]
 async fn approve_equipment_log(
     app: tauri::AppHandle,
     request: equipment_log::ApproveEquipmentLogRequest,
@@ -3127,6 +3136,7 @@ pub fn run() {
             approve_labor_timesheet,
             post_labor_timesheet,
             reverse_labor_timesheet,
+            submit_equipment_log,
             approve_equipment_log,
             post_equipment_log,
             reverse_equipment_log,

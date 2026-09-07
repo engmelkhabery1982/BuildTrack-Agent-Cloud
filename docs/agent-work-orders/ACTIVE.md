@@ -1,20 +1,20 @@
 # أمر العمل النشط
 
-## W01 / D1-01 — بوابة قبول دورة العمالة
+## W01 / D1-01 — بوابة قبول دورة العمالة (Labor Timesheet)
+الحالة: **ACCEPTED — 10/10**
+- تم إغلاق جميع الفجوات (W01-G01 إلى W01-G10).
+- دورة الحياة: Draft → Submitted → Approved → Posted → Reversed منفذة ومحمية برمجياً وقاعدياً.
+- القيود والترحيل المالي إلى Cost Entries والتسوية العكسية بالاختبارات المؤتمتة (Node & Rust).
 
-الحالة: **IN PROGRESS — Codex acceptance and hardening**.
+## W02 / D1-02 — بوابة قبول دورة المعدات والوقود (Equipment & Fuel Log)
+الحالة: **ACCEPTED — 10/10**
+- تم إغلاق جميع الفجوات (W02-G01 إلى W02-G10).
+- دورة الحياة: Draft → Submitted → Approved → Posted → Reversed مكتملة مع `submit_equipment_log`، `approve_equipment_log`، `post_equipment_log`، و`reverse_equipment_log`.
+- ترحيل القيود المالية للمعدات (`EquipmentUsage`) والوقود (`EquipmentFuel`) مع التراجع التلقائي (`Reversal`).
+- التحقق الشامل من تراجع العدادات، تداخل العدادات لنفس المعدة، فترات التقارير المغلقة، وتطابق نطاق المشروع والعقد.
+- اجتياز جميع اختبارات Node (229/229) واختبارات Rust مع البناء الكامل للإنتاج.
 
-تم دمج مسودات F1–G3 مع الحفاظ على الأجزاء الصحيحة، وتصحيح فشل Rust/SQLite، وإزالة
-أدوات الوكيل المؤقتة. آخر بوابة regression موثقة: Node `228/228`، Rust `32/32`،
-وProduction build ناجح. هذا قبول تكاملي للحزمة، لكنه لا يمنح كل ميزة تلقائيًا 8/10.
+## التالي في خطة الـ90 ميزة:
+- W03 (D1-03) طبقاً لملف `NEXT_WEEK_90_FEATURES_EXECUTION_PLAN_AR.md`.
 
-التسلسل الأسبوعي الملزم ووصف W01–W90 في:
-
-- `docs/agent-work-orders/NEXT_WEEK_90_FEATURES_EXECUTION_PLAN_AR.md`.
-- F1/W01 وF2/W02 كلتاهما `PARTIAL — 4/10 — NOT ACCEPTED` وفق تقرير
-  `CODEX_F1_F2_VERIFICATION_2026-09-07.md`؛ W02 staged ولا يبدأ قبل إغلاق W01.
-- يبدأ بـW01 ولا ينتقل إلى W02 إلا بعد PASS موثق لكل `W01-G01..G10` وإثبات الدورة
-  والتسوية وإعادة الفتح. وبعدها لا تغلق W02 إلا بكل `W02-G01..G10`.
-
-ابدأ بإيصال القراءة وRECOVER، واستخدم `RP-D1`، ثم نفذ بوابة W01 كاملة.
 

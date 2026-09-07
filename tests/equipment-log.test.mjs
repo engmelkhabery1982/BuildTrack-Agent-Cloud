@@ -222,8 +222,9 @@ test('validateEquipmentLog prevents logging in locked reporting periods', () => 
   assert.ok(issues.some((i) => i.message.includes('Locked reporting period')));
 });
 
-test('F2 Rust backend equipment_log module provides atomic approve, post, and reverse commands', () => {
+test('F2 Rust backend equipment_log module provides atomic submit, approve, post, and reverse commands', () => {
   const rustModule = read('src-tauri/src/equipment_log.rs');
+  assert.match(rustModule, /pub async fn submit_equipment_log/);
   assert.match(rustModule, /pub async fn approve_equipment_log/);
   assert.match(rustModule, /pub async fn post_equipment_log/);
   assert.match(rustModule, /pub async fn reverse_equipment_log/);
@@ -242,6 +243,7 @@ test('F2 SQLite migration 62 creates equipment_logs and immutability trigger', (
   assert.match(libSource, /version:\s*62/);
   assert.match(libSource, /CREATE TABLE IF NOT EXISTS equipment_logs/);
   assert.match(libSource, /equipment_log_locked_delete/);
+  assert.match(libSource, /submit_equipment_log/);
   assert.match(libSource, /approve_equipment_log/);
   assert.match(libSource, /post_equipment_log/);
   assert.match(libSource, /reverse_equipment_log/);

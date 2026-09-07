@@ -19,18 +19,20 @@ export function calculateLaborLineTotal(line: {
   regular_hours: number;
   regular_rate: number;
   overtime_hours: number;
-  overtime_rate: number;
+  overtime_rate?: number;
 }): { total_hours: number; calculated_amount: number } {
   const regHours = Number(line.regular_hours) || 0;
   const regRate = Number(line.regular_rate) || 0;
   const otHours = Number(line.overtime_hours) || 0;
-  const otRate = Number(line.overtime_rate) || 0;
+  const otRate = line.overtime_rate !== undefined && line.overtime_rate !== null
+    ? Number(line.overtime_rate)
+    : Math.round(regRate * 1.5 * 100) / 100;
   const total_hours = Math.round((regHours + otHours) * 100) / 100;
   const calculated_amount = Math.round((regHours * regRate + otHours * otRate) * 100) / 100;
   return { total_hours, calculated_amount };
 }
 
-export function calculateLaborTimesheetTotals(lines: LaborTimesheetLine[]): {
+export function calculateLaborTimesheetTotals(lines: (LaborTimesheetLine | any)[]): {
   total_regular_hours: number;
   total_overtime_hours: number;
   total_amount: number;
@@ -43,7 +45,9 @@ export function calculateLaborTimesheetTotals(lines: LaborTimesheetLine[]): {
     const regHours = Number(line.regular_hours) || 0;
     const otHours = Number(line.overtime_hours) || 0;
     const regRate = Number(line.regular_rate) || 0;
-    const otRate = Number(line.overtime_rate) || 0;
+    const otRate = line.overtime_rate !== undefined && line.overtime_rate !== null
+      ? Number(line.overtime_rate)
+      : Math.round(regRate * 1.5 * 100) / 100;
     total_regular_hours += regHours;
     total_overtime_hours += otHours;
     total_amount += (regHours * regRate) + (otHours * otRate);
@@ -208,11 +212,14 @@ export function validateLaborTimesheet(
     if (Number(line.regular_hours) < 0 || Number(line.overtime_hours) < 0) {
       issues.push({ lineIndex: index, field: 'regular_hours', message: `Line #${index + 1}: Hours cannot be negative.`, severity: 'error' });
     }
-    if ((Number(line.regular_hours) || 0) + (Number(line.overtime_hours) || 0) <= 0) {
+    const totalLineHours = (Number(line.regular_hours) || 0) + (Number(line.overtime_hours) || 0);
+    if (totalLineHours <= 0) {
       issues.push({ lineIndex: index, field: 'regular_hours', message: `Line #${index + 1}: Total hours must be greater than zero.`, severity: 'error' });
     }
-    if ((Number(line.regular_hours) || 0) > 24 || (Number(line.overtime_hours) || 0) > 24) {
-      issues.push({ lineIndex: index, field: 'regular_hours', message: `Line #${index + 1}: Hours cannot exceed 24 in a single shift.`, severity: 'error' });
+    if (totalLineHours > 16) {
+      issues.push({ lineIndex: index, field: 'regular_hours', message: `Line #${index + 1}: Total worker hours (${totalLineHours}h) exceeds maximum allowed 16 hours per shift.`, severity: 'error' });
+    } else if (totalLineHours > 8) {
+      issues.push({ lineIndex: index, field: 'regular_hours', message: `Line #${index + 1}: Total worker hours (${totalLineHours}h) exceeds standard 8-hour shift. Verify overtime.`, severity: 'warning' });
     }
 
     if (isNonWorkingDay && !line.non_working_override_reason?.trim()) {

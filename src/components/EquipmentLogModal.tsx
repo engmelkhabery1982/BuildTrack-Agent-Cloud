@@ -31,6 +31,7 @@ import type {
 import {
   calculateEquipmentLogTotals,
   validateEquipmentLog,
+  submitEquipmentLog,
   approveEquipmentLog,
   postEquipmentLog,
   reverseEquipmentLog,
@@ -311,7 +312,14 @@ export const EquipmentLogModal: React.FC<EquipmentLogModalProps> = ({
       await onSaveDraft(payload);
 
       const opId = `op-eq-${Date.now()}`;
-      if (targetStatus === 'Approved') {
+      if (targetStatus === 'Submitted') {
+        await submitEquipmentLog({
+          operationId: opId,
+          logId: payload.id!,
+          actor: currentUser,
+          submittedAt: new Date().toISOString(),
+        });
+      } else if (targetStatus === 'Approved') {
         await approveEquipmentLog({
           operationId: opId,
           logId: payload.id!,
@@ -328,7 +336,7 @@ export const EquipmentLogModal: React.FC<EquipmentLogModalProps> = ({
       }
 
       await onRefresh();
-      setSuccessMessage(`Equipment log successfully transitioned to ${targetStatus} and cost entries posted.`);
+      setSuccessMessage(`Equipment log successfully transitioned to ${targetStatus}.`);
       setTimeout(() => {
         setSuccessMessage(null);
         onClose();
@@ -802,16 +810,26 @@ export const EquipmentLogModal: React.FC<EquipmentLogModalProps> = ({
                 className="px-4 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors shadow-md disabled:opacity-50 flex items-center space-x-2"
               >
                 <Send className="w-4 h-4" />
-                <span>Submit & Approve</span>
+                <span>Submit for Approval</span>
               </button>
             )}
-            {(currentStatus === 'Submitted' || currentStatus === 'Approved') && (
+            {currentStatus === 'Submitted' && (
               <button
                 disabled={actionLoading || hasErrors}
-                onClick={() => handleTransition('Posted')}
+                onClick={() => handleTransition('Approved')}
                 className="px-4 py-2 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition-colors shadow-md disabled:opacity-50 flex items-center space-x-2"
               >
                 <ShieldCheck className="w-4 h-4" />
+                <span>Approve Equipment Log</span>
+              </button>
+            )}
+            {currentStatus === 'Approved' && (
+              <button
+                disabled={actionLoading || hasErrors}
+                onClick={() => handleTransition('Posted')}
+                className="px-4 py-2 text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition-colors shadow-md disabled:opacity-50 flex items-center space-x-2"
+              >
+                <DollarSign className="w-4 h-4" />
                 <span>Post Cost Entries</span>
               </button>
             )}

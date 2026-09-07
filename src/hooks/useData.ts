@@ -88,9 +88,8 @@ export function useData() {
   const listOptional = useCallback(async <T,>(tableName: string): Promise<T[]> => {
     try {
       return await dataRepository.list<T & object>(tableName);
-    } catch {
-      // The cloud database can be one migration behind the desktop schema.
-      // Optional Phase 1 tables remain empty until their migration is applied.
+    } catch (err) {
+      console.warn(`[useData] Optional table "${tableName}" not loaded, defaulting to empty list:`, err);
       return [];
     }
   }, []);
@@ -102,18 +101,18 @@ export function useData() {
       const [
         p, t, c, ce, pr, prec, supi, supil, supip, s, pg, sc, sd, sra, wc, sv, de, bl, rp, gr, ap, al, rf, su, qu, sdr, sn, us, ct, bh, bq, cf, si, ci, cit, sit, va, vl, dc, wr, pcor, ld, eq, rm, tr, pa, pc, rh, rt, att, dqr, dqel, rver, cc, wn, sov, ca, cpv, ev, cchg, pcert, vacts, lts, ltsl, eql, clm, clml,
       ] = await Promise.all([
-        dataRepository.list<Project>('projects'),
-        dataRepository.list<Task>('tasks'),
-        dataRepository.list<Cost>('costs'),
-        dataRepository.list<CostEntry>('cost_entries'),
-        dataRepository.list<Procurement>('procurement'),
+        listOptional<Project>('projects'),
+        listOptional<Task>('tasks'),
+        listOptional<Cost>('costs'),
+        listOptional<CostEntry>('cost_entries'),
+        listOptional<Procurement>('procurement'),
         listOptional<ProcurementReceipt>('procurement_receipts'),
         listOptional<SupplierInvoice>('supplier_invoices'),
         listOptional<SupplierInvoiceLine>('supplier_invoice_lines'),
         listOptional<SupplierInvoicePayment>('supplier_invoice_payments'),
-        dataRepository.list<Safety>('safety'),
-        dataRepository.list<ProgressEntry>('progress_entries'),
-        dataRepository.list<Schedule>('schedules'),
+        listOptional<Safety>('safety'),
+        listOptional<ProgressEntry>('progress_entries'),
+        listOptional<Schedule>('schedules'),
         listOptional<ScheduleDistribution>('schedule_distributions'),
         listOptional<ScheduleResourceAssignment>('schedule_resource_assignments'),
         listOptional<WorkCalendar>('work_calendars'),
@@ -128,23 +127,23 @@ export function useData() {
         listOptional<SiteDailyReport>('site_daily_reports'),
         listOptional<PMOSnapshot>('pmo_snapshots'),
         listOptional<AppUser>('app_users'),
-        dataRepository.list<Contract>('contracts'),
-        dataRepository.list<BOQHeader>('boq_headers'),
-        dataRepository.list<BOQItem>('boq_items'),
-        dataRepository.list<CashFlowEntry>('cash_flow'),
-        dataRepository.list<SubcontractorInvoice>('subcontractor_invoices'),
-        dataRepository.list<ClientInvoice>('client_invoices'),
+        listOptional<Contract>('contracts'),
+        listOptional<BOQHeader>('boq_headers'),
+        listOptional<BOQItem>('boq_items'),
+        listOptional<CashFlowEntry>('cash_flow'),
+        listOptional<SubcontractorInvoice>('subcontractor_invoices'),
+        listOptional<ClientInvoice>('client_invoices'),
         listOptional<InvoiceTracking>('client_invoice_tracking'),
         listOptional<InvoiceTracking>('subcontractor_invoice_tracking'),
-        dataRepository.list<Variation>('variations'),
+        listOptional<Variation>('variations'),
         listOptional<VariationLine>('variation_lines'),
-        dataRepository.list<DocumentEntry>('documents'),
-        dataRepository.list<WIREntry>('wir_entries'),
+        listOptional<DocumentEntry>('documents'),
+        listOptional<WIREntry>('wir_entries'),
         listOptional<ProgressCorrection>('progress_corrections'),
-        dataRepository.list<LaborDuty>('labor_duty'),
-        dataRepository.list<Equipment>('equipment'),
+        listOptional<LaborDuty>('labor_duty'),
+        listOptional<Equipment>('equipment'),
         listOptional<ResourceMaster>('resource_masters'),
-        dataRepository.list<TrackingSheet>('tracking_sheet'),
+        listOptional<TrackingSheet>('tracking_sheet'),
         listOptional<Party>('parties'),
         listOptional<PartyContact>('party_contacts'),
         listOptional<RateHistory>('rate_history'),
