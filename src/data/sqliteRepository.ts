@@ -25,10 +25,12 @@ const TABLES = new Set([
   "cost_plan_versions", "cost_plan_periods",
   "estimate_versions", "estimate_lines",
   "variance_actions", "report_versions",
+  "labor_timesheets", "labor_timesheet_lines",
 ]);
 
 const CONTROL_ACCOUNT_SOURCE_TABLES = new Set([
   "schedules", "wir_entries", "cost_entries", "procurement", "procurement_receipts",
+  "labor_timesheet_lines",
 ]);
 
 type StoredRow = {

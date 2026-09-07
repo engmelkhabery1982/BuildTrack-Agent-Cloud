@@ -657,6 +657,57 @@ export interface LaborDuty {
   created_at: string;
 }
 
+export type LaborTimesheetStatus = 'Draft' | 'Submitted' | 'Approved' | 'Posted' | 'Reversed';
+
+export interface LaborTimesheet {
+  id: string;
+  created_at: string;
+  updated_at?: string | null;
+  project_id: string;
+  contract_id: string;
+  timesheet_number: string;
+  work_date: string;
+  shift: 'Day' | 'Night' | 'Shift 1' | 'Shift 2' | string;
+  crew_name?: string | null;
+  contractor?: string | null;
+  submitter: string;
+  status: LaborTimesheetStatus;
+  approved_by?: string | null;
+  approved_at?: string | null;
+  posted_by?: string | null;
+  posted_at?: string | null;
+  reversed_by?: string | null;
+  reversed_at?: string | null;
+  reversal_reason?: string | null;
+  total_regular_hours: number;
+  total_overtime_hours: number;
+  total_amount: number;
+  source_batch?: string | null;
+  notes?: string | null;
+  lines?: LaborTimesheetLine[];
+}
+
+export interface LaborTimesheetLine {
+  id: string;
+  timesheet_id: string;
+  created_at: string;
+  project_id: string;
+  contract_id: string;
+  resource_id: string;
+  schedule_activity_id: string;
+  control_account_id: string;
+  cost_code_id?: string | null;
+  regular_hours: number;
+  overtime_hours: number;
+  regular_rate: number;
+  overtime_rate: number;
+  total_hours: number;
+  calculated_amount: number;
+  currency: string;
+  non_working_override_reason?: string | null;
+  notes?: string | null;
+}
+
 export interface Equipment {
   id: string;
   project_id: string;

@@ -8,6 +8,7 @@ mod commercial_workflow;
 mod report_versioning;
 mod cost_plan_versioning;
 mod estimate_versioning;
+mod labor_timesheet;
 
 #[tauri::command]
 async fn commit_governed_import(
@@ -120,6 +121,33 @@ async fn approve_cost_plan_version(
 async fn approve_estimate_version(app: tauri::AppHandle, request: estimate_versioning::ApproveEstimateRequest) -> Result<estimate_versioning::ApproveEstimateResult, String> {
     let path = app.path().app_config_dir().map_err(|error| error.to_string())?.join("buildtrack.db");
     estimate_versioning::approve_estimate(&path, request).await
+}
+
+#[tauri::command]
+async fn approve_labor_timesheet(
+    app: tauri::AppHandle,
+    request: labor_timesheet::ApproveLaborTimesheetRequest,
+) -> Result<labor_timesheet::LaborTimesheetOperationResult, String> {
+    let path = app.path().app_config_dir().map_err(|error| error.to_string())?.join("buildtrack.db");
+    labor_timesheet::approve_labor_timesheet(&path, request).await
+}
+
+#[tauri::command]
+async fn post_labor_timesheet(
+    app: tauri::AppHandle,
+    request: labor_timesheet::PostLaborTimesheetRequest,
+) -> Result<labor_timesheet::LaborTimesheetOperationResult, String> {
+    let path = app.path().app_config_dir().map_err(|error| error.to_string())?.join("buildtrack.db");
+    labor_timesheet::post_labor_timesheet(&path, request).await
+}
+
+#[tauri::command]
+async fn reverse_labor_timesheet(
+    app: tauri::AppHandle,
+    request: labor_timesheet::ReverseLaborTimesheetRequest,
+) -> Result<labor_timesheet::LaborTimesheetOperationResult, String> {
+    let path = app.path().app_config_dir().map_err(|error| error.to_string())?.join("buildtrack.db");
+    labor_timesheet::reverse_labor_timesheet(&path, request).await
 }
 
 #[tauri::command]
@@ -2573,38 +2601,86 @@ pub fn run() {
             kind: tauri_plugin_sql::MigrationKind::Up,
         },
         tauri_plugin_sql::Migration {
-            version: 60,
-            description: "govern_variance_action_scope_and_transitions",
+            version: 61,
+            description: "add_governed_labor_timesheets",
             sql: r#"
-      CREATE TRIGGER IF NOT EXISTS variance_action_scope_insert
-      BEFORE INSERT ON variance_actions
-      WHEN NEW.project_id IS NULL OR trim(NEW.project_id) = ''
-        OR (NEW.contract_id IS NOT NULL AND NOT EXISTS (
-          SELECT 1 FROM contracts WHERE id = NEW.contract_id AND project_id = NEW.project_id
-        ))
-      BEGIN SELECT RAISE(ABORT, 'Variance action project/contract scope is invalid.'); END;
-      CREATE TRIGGER IF NOT EXISTS variance_action_scope_update
-      BEFORE UPDATE ON variance_actions
-      WHEN NEW.project_id IS NULL OR trim(NEW.project_id) = ''
-        OR (NEW.contract_id IS NOT NULL AND NOT EXISTS (
-          SELECT 1 FROM contracts WHERE id = NEW.contract_id AND project_id = NEW.project_id
-        ))
-      BEGIN SELECT RAISE(ABORT, 'Variance action project/contract scope is invalid.'); END;
-      CREATE TRIGGER IF NOT EXISTS variance_action_transition_guard
-      BEFORE UPDATE ON variance_actions
-      WHEN json_extract(OLD.payload, '$.status') <> json_extract(NEW.payload, '$.status')
-        AND NOT (
-          (json_extract(OLD.payload, '$.status') = 'Open' AND json_extract(NEW.payload, '$.status') = 'Assigned')
-          OR (json_extract(OLD.payload, '$.status') = 'Assigned' AND json_extract(NEW.payload, '$.status') = 'In Progress')
-          OR (json_extract(OLD.payload, '$.status') = 'In Progress' AND json_extract(NEW.payload, '$.status') = 'Resolved')
-          OR (json_extract(OLD.payload, '$.status') = 'Resolved' AND json_extract(NEW.payload, '$.status') IN ('In Progress', 'Closed'))
-        )
-      BEGIN SELECT RAISE(ABORT, 'Invalid variance action lifecycle transition.'); END;
-      CREATE TRIGGER IF NOT EXISTS variance_action_resolution_required
-      BEFORE UPDATE ON variance_actions
-      WHEN json_extract(NEW.payload, '$.status') IN ('Resolved', 'Closed')
-        AND trim(COALESCE(json_extract(NEW.payload, '$.resolution'), '')) = ''
-      BEGIN SELECT RAISE(ABORT, 'A documented resolution is required before resolving or closing an action.'); END;
+      CREATE TABLE IF NOT EXISTS labor_timesheets (
+        id TEXT PRIMARY KEY,
+        created_at TEXT NOT NULL,
+        updated_at TEXT,
+        project_id TEXT NOT NULL,
+        contract_id TEXT NOT NULL,
+        timesheet_number TEXT NOT NULL,
+        work_date TEXT NOT NULL,
+        shift TEXT NOT NULL,
+        crew_name TEXT,
+        contractor TEXT,
+        submitter TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'Draft',
+        approved_by TEXT,
+        approved_at TEXT,
+        posted_by TEXT,
+        posted_at TEXT,
+        reversed_by TEXT,
+        reversed_at TEXT,
+        reversal_reason TEXT,
+        total_regular_hours REAL NOT NULL DEFAULT 0,
+        total_overtime_hours REAL NOT NULL DEFAULT 0,
+        total_amount REAL NOT NULL DEFAULT 0,
+        source_batch TEXT,
+        notes TEXT,
+        payload TEXT NOT NULL,
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE RESTRICT,
+        FOREIGN KEY (contract_id) REFERENCES contracts(id) ON DELETE RESTRICT
+      );
+      CREATE INDEX IF NOT EXISTS idx_labor_timesheets_scope ON labor_timesheets(project_id, contract_id, work_date);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_labor_timesheets_number ON labor_timesheets(project_id, contract_id, lower(timesheet_number));
+      CREATE INDEX IF NOT EXISTS idx_labor_timesheets_date_shift ON labor_timesheets(work_date, shift);
+
+      CREATE TABLE IF NOT EXISTS labor_timesheet_lines (
+        id TEXT PRIMARY KEY,
+        timesheet_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        project_id TEXT NOT NULL,
+        contract_id TEXT NOT NULL,
+        resource_id TEXT NOT NULL,
+        schedule_activity_id TEXT NOT NULL,
+        control_account_id TEXT NOT NULL,
+        cost_code_id TEXT,
+        regular_hours REAL NOT NULL DEFAULT 0,
+        overtime_hours REAL NOT NULL DEFAULT 0,
+        regular_rate REAL NOT NULL DEFAULT 0,
+        overtime_rate REAL NOT NULL DEFAULT 0,
+        total_hours REAL NOT NULL DEFAULT 0,
+        calculated_amount REAL NOT NULL DEFAULT 0,
+        currency TEXT NOT NULL DEFAULT 'USD',
+        non_working_override_reason TEXT,
+        notes TEXT,
+        payload TEXT NOT NULL,
+        FOREIGN KEY (timesheet_id) REFERENCES labor_timesheets(id) ON DELETE CASCADE,
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE RESTRICT,
+        FOREIGN KEY (contract_id) REFERENCES contracts(id) ON DELETE RESTRICT,
+        FOREIGN KEY (resource_id) REFERENCES resource_masters(id) ON DELETE RESTRICT,
+        FOREIGN KEY (control_account_id) REFERENCES control_accounts(id) ON DELETE RESTRICT
+      );
+      CREATE INDEX IF NOT EXISTS idx_labor_timesheet_lines_ts ON labor_timesheet_lines(timesheet_id);
+      CREATE INDEX IF NOT EXISTS idx_labor_timesheet_lines_worker ON labor_timesheet_lines(resource_id);
+      CREATE INDEX IF NOT EXISTS idx_labor_timesheet_lines_ca ON labor_timesheet_lines(control_account_id);
+
+      CREATE TRIGGER IF NOT EXISTS labor_timesheet_locked_delete
+      BEFORE DELETE ON labor_timesheets
+      WHEN OLD.status IN ('Approved', 'Posted', 'Reversed')
+      BEGIN SELECT RAISE(ABORT, 'Approved, Posted or Reversed labor timesheets cannot be deleted.'); END;
+
+      CREATE TRIGGER IF NOT EXISTS labor_timesheet_lines_locked_mutation
+      BEFORE UPDATE ON labor_timesheet_lines
+      WHEN (SELECT status FROM labor_timesheets WHERE id = OLD.timesheet_id) IN ('Approved', 'Posted', 'Reversed')
+      BEGIN SELECT RAISE(ABORT, 'Lines of an Approved, Posted or Reversed timesheet are immutable.'); END;
+
+      CREATE TRIGGER IF NOT EXISTS labor_timesheet_lines_locked_delete
+      BEFORE DELETE ON labor_timesheet_lines
+      WHEN (SELECT status FROM labor_timesheets WHERE id = OLD.timesheet_id) IN ('Approved', 'Posted', 'Reversed')
+      BEGIN SELECT RAISE(ABORT, 'Lines of an Approved, Posted or Reversed timesheet cannot be deleted.'); END;
     "#,
             kind: tauri_plugin_sql::MigrationKind::Up,
         },
@@ -2641,6 +2717,9 @@ pub fn run() {
             issue_report_version,
             approve_cost_plan_version,
             approve_estimate_version,
+            approve_labor_timesheet,
+            post_labor_timesheet,
+            reverse_labor_timesheet,
             save_excel_download,
             save_document_attachment,
             backup_local_database,

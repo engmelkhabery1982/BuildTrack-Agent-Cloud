@@ -13,6 +13,7 @@ export const STATUS_SETS = {
   costPlanVersion: ['Draft', 'Approved', 'Superseded'],
   delayEvent: ['Identified', 'Submitted', 'Approved', 'Rejected', 'Closed'],
   document: ['Draft', 'Under Review', 'Approved', 'Current', 'Superseded'],
+  laborTimesheet: ['Draft', 'Submitted', 'Approved', 'Posted', 'Reversed'],
 } as const;
 
 export const CANONICAL_FIELDS = {
@@ -26,6 +27,7 @@ export const CANONICAL_FIELDS = {
   progress: ['wir_number', 'inspection_date', 'boq_item_id', 'quantity', 'unit_price', 'item_amount'],
   commercial: ['variation_number', 'variation_id', 'invoice_number', 'approved_date', 'effective_date'],
   financial: ['budget', 'planned_value', 'earned_work_value', 'actual_cost', 'inflow', 'outflow', 'net'],
+  laborTimesheet: ['timesheet_number', 'work_date', 'shift', 'crew_name', 'submitter', 'status', 'total_regular_hours', 'total_overtime_hours', 'total_amount'],
 } as const;
 
 export const IMPORT_FIELD_ALIASES: Record<string, string> = {
