@@ -23,6 +23,7 @@
    - `docs/agent-work-orders/CLOUD_PROGRESS_LEDGER.md`
    - `docs/agent-work-orders/PROJECT_CHARTER_AR.md`
    - هذا الملف.
+   - `docs/agent-work-orders/NEXT_FEATURES_DETAILED_EXECUTION_AR.md`
    - `docs/FEATURE_CATALOG_37_AND_CONTINUATION_AR.md`
    - `docs/SAP_OPERATIONAL_CONTROL_ROADMAP_AR.md`
    - نتيجة الميزة السابقة تحت `docs/agent-results/`.
@@ -52,6 +53,28 @@
    وrepository mapping وTypeScript/UI واختبار migration؛ ممنوع حقل JSON خفي فقط.
 10. لا تكرر الحساب داخل Dashboard/modal/test. استخدم دالة إنتاج مركزية تعيد الإجمالي
     وصفوف المساهمة حتى يكون drill-down مطابقًا للبطاقة.
+
+### 3.1 أنماط فشل شوهدت فعليًا وممنوعة صراحة
+
+- ممنوع اختيار `find()` لأول version/contract/control account في المشروع ثم استعماله
+  لنطاق آخر. كل lookup يجب أن يثبت المفتاح المركب الكامل، وتوجد له حالة اختبار سلبية.
+- ممنوع توليد ETC/EV/PV/progress من نسب افتراضية أو `budget - actual` لإخفاء غياب
+  Forecast معتمد. الغياب يعرض `Unavailable` مع سبب.
+- ممنوع اعتبار جدول summary مثل `costs` مصدرًا عندما توجد Cost Entries/PO/GRN/AP/
+  WIR ledgers. الملخص مشتق ويجب أن يتطابق مع المصدر، لا أن ينافسه.
+- ممنوع حفظ status معتمد أو Posted أو Issued عبر generic insert/update ثم تنفيذ آثار
+  جانبية من الواجهة. الانتقال وآثاره وaudit داخل transaction backend واحدة.
+- ممنوع إنشاء مكون أو utility أو migration دون توصيله إلى App/useData/repository/
+  command registration ومسار UI فعلي، ثم الادعاء بأن الميزة اكتملت.
+- ممنوع كتابة اختبار يبحث عن اسم دالة فقط كدليل وظيفي وحيد. يلزم اختبار حساب/معاملة
+  فعلي، واختبار wiring إضافي عند الحاجة.
+- ممنوع نسخ الأرقام أو mock rows إلى Dashboard/Report/Cockpit، أو hard-code مورد أو
+  تاريخ أو عملة أو materiality threshold. الإعداد غير الموجود يبقى `Requires setup`.
+- ممنوع تعديل migration سابقة أو استخدام payload JSON لإخفاء علاقة/حالة حاكمة.
+- ممنوع إعلان Cargo أو desktop acceptance ناجحًا في بيئة لا تحتوي Cargo/Tauri.
+  سجله `NOT RUN — pending Codex Windows gate` ولا تزور النتيجة.
+- ممنوع تحديث `Last accepted capability` أو وضع ✅ أو 8/10. الوكيل يكتب فقط
+  `READY FOR CODEX REVIEW`، وCodex يراجع ويصحح ويعتمد.
 
 ## 4. سياسة إنقاذ العمل وعدم رفض الحزمة كاملة
 
@@ -284,19 +307,29 @@ Superseded؛ sign-off؛ قالب مرن وشعار/حقول/صفحات؛ PDF/Exc
 
 ### الحزمة اللاحقة بعد E3
 
-تنفذ بالترتيب والمواصفات التفصيلية الموجودة في
-`docs/FEATURE_CATALOG_37_AND_CONTINUATION_AR.md` تحت «Backlog التنفيذي الدقيق».
-ميزة واحدة واختبار/commit/push مستقل لكل بوابة. الذكاء الصناعي يأتي بعد البيانات
-المحكومة، ويكون read-only مع ذكر مصدر كل رقم ولا يعتمد أو يعدل معاملة.
+المرجع التنفيذي الملزم هو:
+
+`docs/agent-work-orders/NEXT_FEATURES_DETAILED_EXECUTION_AR.md`
+
+وينفذ بالترتيب الثابت:
+
+`F1 → F2 → F3 → F4 → F5 → F6 → F7 → F8 → F9 → G1 → G2 → G3 → H1`
+
+يحتوي المرجع لكل ميزة على النتيجة التشغيلية، مصدر الحقيقة، الكيانات والعلاقات،
+المعاملات، الواجهة، الانعكاسات واختبارات القبول. النص المختصر في Feature Catalog
+فهرس فقط؛ لا يكفي وحده للتنفيذ. ميزة واحدة وtest/commit/push مستقل لكل بوابة.
+الذكاء الصناعي H1 يأتي أخيرًا، read-only مع مصدر كل رقم ولا يعتمد أو يعدل معاملة.
 
 ## 8. تحديث الانتقال بين الميزات
 
 بعد إنهاء الميزة الحالية:
 
 1. ضع نتيجتها في `docs/agent-results/`.
-2. غيّر سجل الاستمرار إلى `READY FOR CODEX REVIEW`، ثم commit وPush للميزة منفردة.
-3. أعد تشغيل regression على HEAD المدفوع. عند النجاح غيّر السجل في commit مستقل إلى
-   الميزة التالية `IN PROGRESS` وواصل مباشرة دون انتظار رسالة جديدة.
+2. غيّر سجل الاستمرار الحالي إلى `READY FOR CODEX REVIEW`، ثم commit وPush للميزة
+   منفردة. أضف صفًا في سجل التسليم ولا تغيّر `Last accepted capability`.
+3. أعد تشغيل regression على HEAD المدفوع. عند النجاح سجّل الميزة التالية
+   `IN PROGRESS — provisional cloud execution` في commit مستقل وواصل مباشرة دون
+   انتظار رسالة جديدة. تبقى كل الميزات المتجاوزة `READY FOR CODEX REVIEW` حتى Codex.
 4. لا تتوقف اختياريًا بين الميزات. التوقف مسموح فقط عند: قرب انتهاء الحد، فشل متكرر
    موثق، تعارض remote، سر/بيانات مستخدم، أو قرار معماري لا يمكن حسمه من المصادر.
    عندها نفذ WIP commit آمن + Push + `Exact next action` قبل التوقف.

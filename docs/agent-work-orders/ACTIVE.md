@@ -12,6 +12,7 @@
 
 لا يبدأ أي وكيل F1 من الذاكرة أو من تقريره السابق. يجب أولًا قراءة مواصفة F1 في:
 
+- `docs/agent-work-orders/NEXT_FEATURES_DETAILED_EXECUTION_AR.md` (المرجع التفصيلي الملزم)
 - `docs/FEATURE_CATALOG_37_AND_CONTINUATION_AR.md`
 - `docs/agent-work-orders/MASTER_CLOUD_DEVELOPMENT_WORK_ORDER_AR.md`
 - `docs/agent-work-orders/UNIVERSAL_CLOUD_AGENT_PROMPT_AR.md`

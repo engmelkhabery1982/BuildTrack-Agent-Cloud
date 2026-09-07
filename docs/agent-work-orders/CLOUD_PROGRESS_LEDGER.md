@@ -37,6 +37,8 @@
 - Detailed corrections and remaining non-blocking observations:
   `docs/agent-results/CODEX_D1_E3_INTEGRATION_RESULT.md`.
 - Exact next feature: F1. Do not repeat C4/D1/D2/D3/D4/E1/E2/E3.
+- Detailed execution authority for F1 through H1:
+  `docs/agent-work-orders/NEXT_FEATURES_DETAILED_EXECUTION_AR.md`.
 
 ## تحديث التسليم — E2
 

@@ -32,7 +32,12 @@
 
 - `docs/agent-work-orders/CLOUD_PROGRESS_LEDGER.md`
 - `docs/agent-work-orders/MASTER_CLOUD_DEVELOPMENT_WORK_ORDER_AR.md`
+- `docs/agent-work-orders/NEXT_FEATURES_DETAILED_EXECUTION_AR.md`
+- `docs/agent-work-orders/UNIVERSAL_CLOUD_AGENT_PROMPT_AR.md`
 - `docs/FEATURE_CATALOG_37_AND_CONTINUATION_AR.md`
+
+هذا الملف لا يُرسل الآن للوكيل لأنه خاص تاريخيًا بـA2. الرسالة الوحيدة الجاهزة
+للبدء والاستمرار هي `UNIVERSAL_CLOUD_AGENT_PROMPT_AR.md`.
 
 ## الميزة المطلوبة فقط
 
