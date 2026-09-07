@@ -22,6 +22,7 @@ import { CommitmentReconciliationModal } from '@/components/CommitmentReconcilia
 import { CostVarianceDrillDownModal } from '@/components/CostVarianceDrillDownModal';
 import { LaborTimesheetModal } from '@/components/LaborTimesheetModal';
 import { EquipmentLogModal } from '@/components/EquipmentLogModal';
+import { ClaimAssessmentModal } from '@/components/ClaimAssessmentModal';
 import { IntegratedProjectControlsCockpit } from '@/components/IntegratedProjectControlsCockpit';
 import { VarianceActionRegisterView } from '@/components/VarianceActionRegisterView';
 import { useVarianceActions } from '@/hooks/useVarianceActions';
@@ -69,6 +70,7 @@ const NAV_ITEMS: { key: ViewKey; label: string; icon: IconType; group: string }[
   { key: 'progress', label: 'WIR & Progress', icon: TrendingUp, group: 'Planning & Controls' },
   { key: 'contracts', label: 'Contracts', icon: FileSignature, group: 'Commercial & Cash' },
   { key: 'variations', label: 'Variations', icon: GitBranch, group: 'Commercial & Cash' },
+  { key: 'claims', label: 'Claims & PVO', icon: FileText, group: 'Commercial & Cash' },
   { key: 'variationLines', label: 'Variation Lines', icon: ListOrdered, group: 'Commercial & Cash' },
   { key: 'contractSov', label: 'Contract SOV', icon: ClipboardList, group: 'Commercial & Cash' },
   { key: 'controlAccounts', label: 'Control Accounts', icon: Layers, group: 'Planning & Controls' },
@@ -773,6 +775,22 @@ const INVOICE_TRACKING_COLUMNS: ColumnDef[] = [
   { key: 'notes', label: 'Notes', type: 'text', editable: true },
 ];
 
+const CLAIM_STATUSES = ['Draft', 'Submitted', 'Under Review', 'Assessed', 'Approved', 'Rejected', 'Converted to PVO'];
+const CLAIM_COLUMNS: ColumnDef[] = [
+  { key: 'claim_number', label: 'Claim #', type: 'text', editable: true },
+  { key: 'contract_id', label: 'Contract', type: 'select', editable: true },
+  { key: 'title', label: 'Title', type: 'text', editable: true },
+  { key: 'notice_date', label: 'Notice Date', type: 'date', editable: true },
+  { key: 'event_date', label: 'Event Date', type: 'date', editable: true },
+  { key: 'claimed_amount', label: 'Claimed Amount', type: 'money', editable: true },
+  { key: 'claimed_delay_days', label: 'Claimed Delay', type: 'number', editable: true },
+  { key: 'assessed_amount', label: 'Assessed Amount', type: 'money', editable: true },
+  { key: 'assessed_delay_days', label: 'Assessed Delay', type: 'number', editable: true },
+  { key: 'approved_amount', label: 'Approved Amount', type: 'money', editable: true },
+  { key: 'approved_delay_days', label: 'Approved Delay', type: 'number', editable: true },
+  { key: 'status', label: 'Status', type: 'status', editable: true, options: CLAIM_STATUSES },
+];
+
 const VARIATION_COLUMNS: ColumnDef[] = [
   { key: 'variation_number', label: 'Variation #', type: 'text', editable: true },
   { key: 'contract_id', label: 'Contract Code', type: 'select', editable: true },
@@ -1025,6 +1043,7 @@ const VIEW_CONFIGS: Record<string, { columns: ColumnDef[]; filters?: FilterDef[]
   clientInvoiceTracking: { columns: INVOICE_TRACKING_COLUMNS, filters: [{ key: 'status', label: 'Invoice Status', options: INVOICE_STATUSES }, { key: 'payment_status', label: 'Payment Status', options: PAYMENT_STATUSES }], showProjectFilter: true, dateRangeColumn: 'invoice_date' },
   subcontractorInvoiceTracking: { columns: INVOICE_TRACKING_COLUMNS, filters: [{ key: 'status', label: 'Invoice Status', options: INVOICE_STATUSES }, { key: 'payment_status', label: 'Payment Status', options: PAYMENT_STATUSES }], showProjectFilter: true, dateRangeColumn: 'invoice_date' },
   variations: { columns: VARIATION_COLUMNS, filters: [{ key: 'contractor', label: 'Company', options: [] }, { key: 'contract_role', label: 'Contract Role', options: ['Main Contract', 'Subcontract'] }, { key: 'status', label: 'Status', options: VARIATION_STATUSES }], showProjectFilter: true, dateRangeColumn: 'approved_date' },
+  claims: { columns: CLAIM_COLUMNS, filters: [{ key: 'status', label: 'Status', options: CLAIM_STATUSES }], showProjectFilter: true, dateRangeColumn: 'notice_date' },
   variationLines: { columns: VARIATION_LINE_COLUMNS, filters: [{ key: 'change_type', label: 'Change Type', options: ['New Item', 'Quantity Change', 'Rate Change', 'Quantity & Rate Change'] }], showProjectFilter: true, dateRangeColumn: 'effective_date' },
   documents: { columns: DOC_COLUMNS, filters: [{ key: 'status', label: 'Status', options: DOC_STATUSES }, { key: 'document_type', label: 'Type', options: DOC_TYPES }], showProjectFilter: true, dateRangeColumn: 'upload_date' },
   wir: { columns: WIR_COLUMNS, filters: [{ key: 'control_account_id', label: 'Control Account', options: [] }, { key: 'company_name', label: 'Contractor', options: [] }, { key: 'contract_role', label: 'Contract Role', options: ['Main Contract', 'Subcontract'] }, { key: 'result', label: 'Result', options: WIR_RESULTS }], showProjectFilter: true, dateRangeColumn: 'inspection_date' },
@@ -1045,7 +1064,7 @@ const TABLE_NAMES: Record<string, string> = {
   schedule: 'schedules', contracts: 'contracts', boq: 'boq_headers', boqItems: 'boq_items', quantityLedger: 'boq_items', progressCorrections: 'progress_corrections',
   cashflow: 'cash_flow', subinvoices: 'subcontractor_invoices', clientinvoices: 'client_invoices',
   clientInvoiceTracking: 'client_invoice_tracking', subcontractorInvoiceTracking: 'subcontractor_invoice_tracking',
-  variations: 'variations', variationLines: 'variation_lines', documents: 'documents', wir: 'wir_entries',
+  variations: 'variations', claims: 'claims', variationLines: 'variation_lines', documents: 'documents', wir: 'wir_entries',
   laborDuty: 'labor_duty', laborTimesheets: 'labor_timesheets', resourceMaster: 'resource_masters', equipment: 'equipment', equipmentLogs: 'equipment_logs', tracking: 'tracking_sheet',
   parties: 'parties', partyContacts: 'party_contacts', rateHistory: 'rate_history',
 };
@@ -1059,7 +1078,7 @@ const VIEW_TITLES: Record<string, string> = {
   schedule: 'Schedule', contracts: 'Contracts', boq: 'BOQ Headers', boqItems: 'BOQ Items', quantityLedger: 'Quantity Ledger', progressCorrections: 'Progress Corrections',
   cashflow: 'Cash Flow', subinvoices: 'Subcontractor Invoices', clientinvoices: 'Client Invoices',
   clientInvoiceTracking: 'Client Invoice Tracking', subcontractorInvoiceTracking: 'Subcontractor Invoice Tracking',
-  variations: 'Variations', variationLines: 'Variation Lines', documents: 'Documents', wir: 'Work Inspection Reports',
+  variations: 'Variations', claims: 'Claims & Potential Variation Orders (PVO)', variationLines: 'Variation Lines', documents: 'Documents', wir: 'Work Inspection Reports',
   laborDuty: 'Labor Duty', laborTimesheets: 'Labor Timesheets', resourceMaster: 'Resource Master', equipment: 'Equipment', equipmentLogs: 'Equipment Logs', tracking: 'Tracking Sheet',
   parties: 'Clients, Vendors & Subcontractors', partyContacts: 'Party Contacts', rateHistory: 'Rate History',
 };
@@ -1112,6 +1131,8 @@ function AppWorkspace() {
   const [selectedLaborTimesheet, setSelectedLaborTimesheet] = useState<any | null>(null);
   const [equipmentLogModalOpen, setEquipmentLogModalOpen] = useState(false);
   const [selectedEquipmentLog, setSelectedEquipmentLog] = useState<any | null>(null);
+  const [claimModalOpen, setClaimModalOpen] = useState(false);
+  const [selectedClaim, setSelectedClaim] = useState<any | null>(null);
   const { dataDate: unifiedDataDate } = useProjectDataDate();
   const data = useData();
   const {
@@ -4055,6 +4076,13 @@ function AppWorkspace() {
             setSelectedEquipmentLog(row);
             setEquipmentLogModalOpen(true);
           },
+        } : tableName === 'claims' ? {
+          label: 'Assessment & PVO',
+          title: 'Open Claim Assessment & Potential Variation Order Workbench',
+          onClick: (row) => {
+            setSelectedClaim(row);
+            setClaimModalOpen(true);
+          },
         } : tableName === 'labor_timesheets' ? {
           label: 'Open Modal',
           title: 'Open Labor Timesheet & Cost Modal',
@@ -4514,7 +4542,7 @@ function AppWorkspace() {
           ? async (invoiceRow) => deleteInvoiceGroup(tableName, invoiceRow)
           : undefined}
         deleteGroupKey={tableName === 'client_invoices' || tableName === 'subcontractor_invoices' ? 'invoice_number' : undefined}
-        addButtonLabel={tableName === 'client_invoices' || tableName === 'subcontractor_invoices' ? 'Create Invoice' : tableName === 'equipment_logs' ? 'Create Equipment Log' : tableName === 'labor_timesheets' ? 'Create Timesheet' : undefined}
+        addButtonLabel={tableName === 'client_invoices' || tableName === 'subcontractor_invoices' ? 'Create Invoice' : tableName === 'equipment_logs' ? 'Create Equipment Log' : tableName === 'labor_timesheets' ? 'Create Timesheet' : tableName === 'claims' ? 'Create Claim' : undefined}
         submitLabel={tableName === 'client_invoices' || tableName === 'subcontractor_invoices' ? 'Save Invoice' : undefined}
         createDraft={tableName === 'contracts' ? () => ({
           contract_role: 'Main Contract',
@@ -4527,6 +4555,10 @@ function AppWorkspace() {
         } : tableName === 'equipment_logs' ? () => {
           setSelectedEquipmentLog(null);
           setEquipmentLogModalOpen(true);
+          return null as any;
+        } : tableName === 'claims' ? () => {
+          setSelectedClaim(null);
+          setClaimModalOpen(true);
           return null as any;
         } : undefined}
       />
@@ -4697,6 +4729,48 @@ function AppWorkspace() {
           await data.reload();
         }}
         onRefresh={async () => {
+          await data.reload();
+        }}
+      />
+      <ClaimAssessmentModal
+        isOpen={claimModalOpen}
+        onClose={() => {
+          setClaimModalOpen(false);
+          setSelectedClaim(null);
+        }}
+        claim={selectedClaim}
+        projects={data.projects}
+        contracts={data.contracts}
+        boqHeaders={data.boqHeaders}
+        boqItems={data.boqItems}
+        onSave={async (claimData, lines) => {
+          if (selectedClaim && selectedClaim.id) {
+            await dataRepository.update('claims', selectedClaim.id, claimData);
+            data.applyLocalMutation('claims', { type: 'update', row: { ...selectedClaim, ...claimData } });
+          } else {
+            const inserted = await dataRepository.insert('claims', claimData);
+            data.applyLocalMutation('claims', { type: 'insert', row: inserted });
+          }
+          for (const line of lines) {
+            if (line.id && data.claimLines.some((l: any) => l.id === line.id)) {
+              await dataRepository.update('claim_lines', line.id, line);
+              data.applyLocalMutation('claim_lines', { type: 'update', row: line });
+            } else {
+              const insertedLine = await dataRepository.insert('claim_lines', line);
+              data.applyLocalMutation('claim_lines', { type: 'insert', row: insertedLine });
+            }
+          }
+          await data.reload();
+        }}
+        onConvertToVariation={async (variationPayload, linesPayload, updatedClaim) => {
+          const varInserted = await dataRepository.insert('variations', variationPayload);
+          data.applyLocalMutation('variations', { type: 'insert', row: varInserted });
+          for (const vl of linesPayload) {
+            const vlInserted = await dataRepository.insert('variation_lines', vl);
+            data.applyLocalMutation('variation_lines', { type: 'insert', row: vlInserted });
+          }
+          await dataRepository.update('claims', updatedClaim.id, updatedClaim);
+          data.applyLocalMutation('claims', { type: 'update', row: updatedClaim });
           await data.reload();
         }}
       />

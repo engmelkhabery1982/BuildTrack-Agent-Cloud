@@ -26,7 +26,7 @@ const TABLES = new Set([
   "estimate_versions", "estimate_lines",
   "variance_actions", "report_versions",
   "labor_timesheets", "labor_timesheet_lines",
-  "equipment_logs",
+  "equipment_logs", "claims", "claim_lines",
 ]);
 
 const CONTROL_ACCOUNT_SOURCE_TABLES = new Set([

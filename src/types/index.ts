@@ -1393,6 +1393,7 @@ export type ViewKey =
   | 'contracts'
   | 'variations'
   | 'variationLines'
+  | 'claims'
   | 'contractSov'
   | 'controlAccounts'
   | 'costChanges'
@@ -1804,6 +1805,53 @@ export interface EstimateVersion {
   notes?: string;
   lines: EstimateLine[];
   payload?: string;
+}
+
+export type ClaimStatus = 'Draft' | 'Notified' | 'Submitted' | 'Under Assessment' | 'Assessed' | 'Approved' | 'Rejected' | 'Converted';
+
+export interface Claim {
+  id: string;
+  project_id: string;
+  contract_id: string;
+  claim_number: string;
+  title: string;
+  notice_date: string;
+  event_date: string;
+  claimant_party_id?: string | null;
+  respondent_party_id?: string | null;
+  entitlement_basis: string;
+  linked_rfi_id?: string | null;
+  linked_delay_id?: string | null;
+  linked_document_id?: string | null;
+  linked_activity_id?: string | null;
+  linked_boq_item_id?: string | null;
+  claimed_cost_impact: number;
+  claimed_time_impact_days: number;
+  assessed_cost_impact: number;
+  assessed_time_impact_days: number;
+  approved_cost_impact: number;
+  approved_time_impact_days: number;
+  status: ClaimStatus;
+  owner: string;
+  evidence_notes?: string | null;
+  reversal_reason?: string | null;
+  converted_variation_id?: string | null;
+  created_at: string;
+}
+
+export interface ClaimLine {
+  id: string;
+  claim_id: string;
+  contract_id: string;
+  item_code: string;
+  description: string;
+  change_type: 'New Item' | 'Quantity Change' | 'Rate Change' | 'Quantity & Rate Change';
+  claimed_value: number;
+  assessed_value: number;
+  approved_value: number;
+  boq_header_id?: string | null;
+  boq_item_id?: string | null;
+  value_impact?: number;
 }
 
 
