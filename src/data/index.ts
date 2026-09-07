@@ -33,6 +33,13 @@ export {
   postLaborTimesheet,
   reverseLaborTimesheet,
 } from "./laborTimesheet";
+export {
+  calculateEquipmentLogTotals,
+  validateEquipmentLog,
+  approveEquipmentLog,
+  postEquipmentLog,
+  reverseEquipmentLog,
+} from "./equipmentLog";
 export { CANONICAL_FIELDS, IMPORT_FIELD_ALIASES, STATUS_SETS, isCanonicalStatus } from "./dataDictionary";
 export {
   assertCodeCanBeLocked,

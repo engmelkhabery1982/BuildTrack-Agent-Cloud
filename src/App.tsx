@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { LayoutDashboard, FolderKanban, SquareCheck as CheckSquare, DollarSign, Package, ShieldAlert, TrendingUp, CalendarClock, Signature as FileSignature, ClipboardList, Banknote, Receipt, FileText, GitBranch, FolderOpen, FileCheck as FileCheck2, Building2, Menu, ListOrdered, HardHat, Wrench, ClipboardCheck, Layers, Download, Bell, CircleAlert, BrainCircuit, Maximize2, Minimize2, ArrowLeft, ArrowRight, Users, Gauge } from 'lucide-react';
 import { useData } from '@/hooks/useData';
-import { acceptProcurementReceipt, amendPurchaseOrder, approveCostChange, approveCostPlanVersion, approvePaymentCertificate, approvePurchaseOrder, approveSupplierInvoice, approveVariation, assertBaselineApproval, assertRecordPeriodIsOpen, assertReportingPeriodDefinition, cancelPurchaseOrder, compareBaselineActivities, compareBaselineActivityDetails, compareBaselineRevisions, createBaselineActivitySnapshot, createBaselineDistributionSnapshot, createCodeDraft, dataRepository, issueReportVersion, prepareCodeControlledInsert, reverseCommercialPosting, reverseSupplierApPosting, reverseVariation, runDataQualityChecks, settlePaymentCertificate, settleSupplierInvoicePayment, STATUS_SETS, summarizeBaselineSchedule, submitLaborTimesheet, approveLaborTimesheet, postLaborTimesheet, reverseLaborTimesheet } from '@/data';
+import { acceptProcurementReceipt, amendPurchaseOrder, approveCostChange, approveCostPlanVersion, approvePaymentCertificate, approvePurchaseOrder, approveSupplierInvoice, approveVariation, assertBaselineApproval, assertRecordPeriodIsOpen, assertReportingPeriodDefinition, cancelPurchaseOrder, compareBaselineActivities, compareBaselineActivityDetails, compareBaselineRevisions, createBaselineActivitySnapshot, createBaselineDistributionSnapshot, createCodeDraft, dataRepository, issueReportVersion, prepareCodeControlledInsert, reverseCommercialPosting, reverseSupplierApPosting, reverseVariation, runDataQualityChecks, settlePaymentCertificate, settleSupplierInvoicePayment, STATUS_SETS, summarizeBaselineSchedule, submitLaborTimesheet, approveLaborTimesheet, postLaborTimesheet, reverseLaborTimesheet, approveEquipmentLog, postEquipmentLog, reverseEquipmentLog } from '@/data';
 import { Dashboard } from '@/components/Dashboard';
 import { DataTableView, type ColumnDef, type FilterDef, type SelectOption } from '@/components/DataTableView';
 import { ReportTemplateDesigner } from '@/components/ReportTemplateDesigner';
@@ -21,6 +21,7 @@ import { EstimateForecastModal } from '@/components/EstimateForecastModal';
 import { CommitmentReconciliationModal } from '@/components/CommitmentReconciliationModal';
 import { CostVarianceDrillDownModal } from '@/components/CostVarianceDrillDownModal';
 import { LaborTimesheetModal } from '@/components/LaborTimesheetModal';
+import { EquipmentLogModal } from '@/components/EquipmentLogModal';
 import { IntegratedProjectControlsCockpit } from '@/components/IntegratedProjectControlsCockpit';
 import { VarianceActionRegisterView } from '@/components/VarianceActionRegisterView';
 import { useVarianceActions } from '@/hooks/useVarianceActions';
@@ -1109,6 +1110,8 @@ function AppWorkspace() {
   const [costVarianceDrillDownOpen, setCostVarianceDrillDownOpen] = useState(false);
   const [laborTimesheetModalOpen, setLaborTimesheetModalOpen] = useState(false);
   const [selectedLaborTimesheet, setSelectedLaborTimesheet] = useState<any | null>(null);
+  const [equipmentLogModalOpen, setEquipmentLogModalOpen] = useState(false);
+  const [selectedEquipmentLog, setSelectedEquipmentLog] = useState<any | null>(null);
   const { dataDate: unifiedDataDate } = useProjectDataDate();
   const data = useData();
   const {
@@ -4045,6 +4048,20 @@ function AppWorkspace() {
             await reverseVariation({ operationId: crypto.randomUUID(), sourceId: row.id, actor: 'Local User', reason: reason.trim() });
             await data.reload();
           },
+        } : tableName === 'equipment_logs' ? {
+          label: 'Open Modal',
+          title: 'Open Equipment Log & Meter Modal',
+          onClick: (row) => {
+            setSelectedEquipmentLog(row);
+            setEquipmentLogModalOpen(true);
+          },
+        } : tableName === 'labor_timesheets' ? {
+          label: 'Open Modal',
+          title: 'Open Labor Timesheet & Cost Modal',
+          onClick: (row) => {
+            setSelectedLaborTimesheet(row);
+            setLaborTimesheetModalOpen(true);
+          },
         } : tableName === 'costs' ? {
           label: 'Preview Cost',
           title: 'Render this cost-control record using a saved flexible template.',
@@ -4460,6 +4477,31 @@ function AppWorkspace() {
           }
           if (['Approved', 'Posted', 'Reversed'].includes(String(current?.status || ''))) throw new Error('Governed labor timesheets are immutable; use approval, posting, or reversal.');
           return dataRepository.update<Record<string, any>>('labor_timesheets', id, patch);
+        } : tableName === 'equipment_logs' ? async (id, patch) => {
+          const current = (data.equipmentLogs || []).find((row: any) => row.id === id) as any;
+          if (patch.status === 'Approved' && (current?.status === 'Submitted' || current?.status === 'Draft')) {
+            if ("__TAURI_INTERNALS__" in window) {
+              await approveEquipmentLog({ operationId: crypto.randomUUID(), logId: id, actor: sessionUser?.username || 'Local User', approvedAt: patch.approved_at || new Date().toISOString().slice(0, 10) });
+              const rows = await dataRepository.list<Record<string, any>>('equipment_logs');
+              return rows.find((row) => row.id === id) || current;
+            }
+          }
+          if (patch.status === 'Posted' && current?.status === 'Approved') {
+            if ("__TAURI_INTERNALS__" in window) {
+              await postEquipmentLog({ operationId: crypto.randomUUID(), logId: id, actor: sessionUser?.username || 'Local User', postedAt: patch.posted_at || new Date().toISOString().slice(0, 10) });
+              const rows = await dataRepository.list<Record<string, any>>('equipment_logs');
+              return rows.find((row) => row.id === id) || current;
+            }
+          }
+          if (patch.status === 'Reversed' && current?.status === 'Posted') {
+            if ("__TAURI_INTERNALS__" in window) {
+              await reverseEquipmentLog({ operationId: crypto.randomUUID(), logId: id, actor: sessionUser?.username || 'Local User', reason: patch.reversal_reason || 'Manual Reversal', reversedAt: patch.reversed_at || new Date().toISOString().slice(0, 10) });
+              const rows = await dataRepository.list<Record<string, any>>('equipment_logs');
+              return rows.find((row) => row.id === id) || current;
+            }
+          }
+          if (['Approved', 'Posted', 'Reversed'].includes(String(current?.status || ''))) throw new Error('Governed equipment logs are immutable; use approval, posting, or reversal.');
+          return dataRepository.update<Record<string, any>>('equipment_logs', id, patch);
         } : tableName === 'supplier_invoice_lines' ? async (id, patch) => {
           const current = data.supplierInvoiceLines.find((row: any) => row.id === id) as any;
           const invoice = data.supplierInvoices.find((row: any) => row.id === current?.supplier_invoice_id) as any;
@@ -4472,13 +4514,21 @@ function AppWorkspace() {
           ? async (invoiceRow) => deleteInvoiceGroup(tableName, invoiceRow)
           : undefined}
         deleteGroupKey={tableName === 'client_invoices' || tableName === 'subcontractor_invoices' ? 'invoice_number' : undefined}
-        addButtonLabel={tableName === 'client_invoices' || tableName === 'subcontractor_invoices' ? 'Create Invoice' : undefined}
+        addButtonLabel={tableName === 'client_invoices' || tableName === 'subcontractor_invoices' ? 'Create Invoice' : tableName === 'equipment_logs' ? 'Create Equipment Log' : tableName === 'labor_timesheets' ? 'Create Timesheet' : undefined}
         submitLabel={tableName === 'client_invoices' || tableName === 'subcontractor_invoices' ? 'Save Invoice' : undefined}
         createDraft={tableName === 'contracts' ? () => ({
           contract_role: 'Main Contract',
           ...createCodeDraft('contracts', data.contracts as Record<string, any>[]),
           ...createCodeDraft('projects', data.projects as Record<string, any>[]),
-        }) : tableName === 'procurement' || tableName === 'procurement_receipts' || tableName === 'labor_timesheets' ? () => ({ status: 'Draft' }) : undefined}
+        }) : tableName === 'procurement' || tableName === 'procurement_receipts' ? () => ({ status: 'Draft' }) : tableName === 'labor_timesheets' ? () => {
+          setSelectedLaborTimesheet(null);
+          setLaborTimesheetModalOpen(true);
+          return null as any;
+        } : tableName === 'equipment_logs' ? () => {
+          setSelectedEquipmentLog(null);
+          setEquipmentLogModalOpen(true);
+          return null as any;
+        } : undefined}
       />
       <ScheduleVersionModal
         isOpen={tableName === 'schedule' && scheduleVersionOpen}
@@ -4613,6 +4663,36 @@ function AppWorkspace() {
             } else {
               await dataRepository.insert<Record<string, any>>('labor_timesheet_lines', line as any);
             }
+          }
+          await data.reload();
+        }}
+        onRefresh={async () => {
+          await data.reload();
+        }}
+      />
+      <EquipmentLogModal
+        isOpen={equipmentLogModalOpen}
+        onClose={() => {
+          setEquipmentLogModalOpen(false);
+          setSelectedEquipmentLog(null);
+        }}
+        log={selectedEquipmentLog}
+        projects={data.projects}
+        contracts={data.contracts}
+        controlAccounts={data.controlAccounts}
+        schedules={data.schedules}
+        resourceMasters={data.resourceMasters || []}
+        reportingPeriods={data.reportingPeriods || []}
+        workCalendars={data.workCalendars || []}
+        costCodes={data.costCodes || []}
+        allLogs={data.equipmentLogs || []}
+        dataDate={unifiedDataDate}
+        currentUser={sessionUser?.username || 'Site Engineer'}
+        onSaveDraft={async (log) => {
+          if (log.id && (data.equipmentLogs || []).some((l: any) => l.id === log.id)) {
+            await dataRepository.update<Record<string, any>>('equipment_logs', log.id, log);
+          } else {
+            await dataRepository.insert<Record<string, any>>('equipment_logs', log as any);
           }
           await data.reload();
         }}

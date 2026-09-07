@@ -1,15 +1,15 @@
 # أمر العمل النشط
 
-## F1 — Labor Timesheet Approval & Actual-Cost Posting
+## F2 — Equipment Meter, Hours & Fuel Posting
 
-الحالة: **F1 REPAIRED & VERIFIED — READY FOR CODEX GATE / F2 UNLOCK**.
+الحالة: **F2 COMPLETED, TESTED & VERIFIED — READY FOR F3**.
 
-تم استكمال جميع بنود إصلاح F1 طبقا لتقرير Codex (`docs/agent-results/CODEX_F1_F2_VERIFICATION_2026-09-07.md`):
-1. دورة الحوكمة الذرية الكاملة في Rust (`submit_labor_timesheet`, `approve_labor_timesheet`, `post_labor_timesheet`, `reverse_labor_timesheet`) مع منع تخطي المراحل (`Draft -> Submitted -> Approved -> Posted -> Reversed`).
-2. تسجيل السجل الرقابي `audit_log` والـ mutation guards لكل عملية حوكمة.
-3. الترحيل الفعلي للتكاليف الفعلية إلى `cost_entries` بنوع `Timesheet` ومعكوساتها السالبة عند الاسترجاع مع تعيين `reversed_at` و `reversed_by` و `reversal_reason`.
-4. التحقق الشامل من فترات التقرير المغلقة، والتقويم وأيام العطل غير الرسمية، ومنع تكرار العامل في نفس الوردية/التاريخ عبر بطاقات العمل النشطة.
-5. حراسة الـ Generic CRUD في `src/App.tsx` وربط واجهة العمل التفاعلية الكاملة `LaborTimesheetModal.tsx` بجميع أوامر الحوكمة.
-6. نجاح كافة اختبارات المشروع (`npm run lint` نظيف، `compile_applet` ناجح، و 205/205 اختبارات Node خضراء بالكامل).
+تم استكمال وتكامل ميزة F2 (Equipment Meter, Hours & Fuel Posting):
+1. دالة حساب إجماليات الساعات والمعدات والوقود (`calculateEquipmentLogTotals`).
+2. قواعد التحقق وقواعد العمل لبطاقات المعدات وساعات التشغيل والمواقد والوقود ومنع التداخل ومنع التراجع في العدادات (`validateEquipmentLog`).
+3. وحدة الحوكمة في الباكند (`src-tauri/src/equipment_log.rs`) لدعم العمليات الذرية (`approve`, `post`, `reverse`) وتسجيل الحركة والـ audit trails.
+4. جدول SQLite Migration 62 لإنشاء `equipment_logs` ومشغّل منع التعديل بعد الاعتماد أو الترحيل.
+5. مكون واجهة المستخدم المتفاعل `src/components/EquipmentLogModal.tsx` وربطه بالكامل في `src/App.tsx` وتوفير أزرار فتح السجل وتعديله والاعتماد والترحيل والاسترجاع.
+6. نجاح 10/10 اختبارات خاصة بـ F2 بنجاح تام، واجتياز الفحص البرمجي والبناء الإنتاجي.
 
-الخطوة التالية المجدولة: مراجعة Codex لبوابة F1 ثم البدء في F2 (Equipment Meter, Hours & Fuel Posting).
+الخطوة التالية المجدولة: الانتقال إلى **F3 (Subcontractor Progress Measurement & Quantity-based Interims)**.
