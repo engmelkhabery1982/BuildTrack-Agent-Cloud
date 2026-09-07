@@ -31,6 +31,7 @@
 
 ### MUST READ
 
+- `docs/agent-results/CODEX_F1_F2_VERIFICATION_2026-09-07.md` — قسم F1 فقط
 - `src-tauri/src/labor_timesheet.rs`
 - `src/data/laborTimesheet.ts`
 - `tests/labor-timesheet.test.mjs`
@@ -60,6 +61,7 @@ Dashboard وReport Pack وPrimavera وClaims/Invoices/Portal. انعكاس F1 ي
 
 ### MUST READ
 
+- `docs/agent-results/CODEX_F1_F2_VERIFICATION_2026-09-07.md` — قسم F2 فقط
 - `src-tauri/src/equipment_log.rs`
 - `src/data/equipmentLog.ts`
 - `tests/equipment-log.test.mjs`

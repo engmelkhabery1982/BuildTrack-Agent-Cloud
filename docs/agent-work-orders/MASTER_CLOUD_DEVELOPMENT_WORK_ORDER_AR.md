@@ -18,11 +18,12 @@
 نفذ هذا قبل اقتراح أو تعديل أي كود:
 
 1. Pull آخر `main` من Agent Cloud وتحقق من HEAD وworking tree.
-2. لا تقرأ المشروع أو المراجع كاملة. اقرأ `AGENTS.md`، ثم قسم الحالة الحالية فقط
+2. لا تقرأ المشروع أو المراجع كاملة. اقرأ `AGENTS.md` وهذا الملف و
+   `docs/agent-work-orders/PROJECT_CHARTER_AR.md` كاملين، ثم `ACTIVE.md`، ثم قسم الحالة الحالية فقط
    من `docs/agent-work-orders/CLOUD_PROGRESS_LEDGER.md`، ثم قسم الميزة النشطة فقط
    من `docs/agent-work-orders/NEXT_FEATURES_DETAILED_EXECUTION_AR.md`، ثم حزمة
    `MUST READ` الخاصة بها في `docs/agent-work-orders/FEATURE_READ_PACKS_AR.md`.
-   لا تفتح Charter أو Feature Catalog أو SAP Roadmap أو تقارير قديمة إلا إذا سمت
+   لا تفتح Feature Catalog أو SAP Roadmap أو تقارير قديمة إلا إذا سمت
    حزمة الميزة الملف/القسم صراحة. ابحث بـ`rg` وافتح المقاطع المطابقة فقط.
 3. افحص آخر 10 commits وأي diff غير مكتمل للميزة النشطة.
 4. شغّل اختبارات الأساس قبل التعديل. إذا كانت فاشلة، سجل الفشل ولا تخفّض اختبارًا.

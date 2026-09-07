@@ -28,6 +28,17 @@ test('universal agent prompt enforces governed sources, atomic transitions and h
   assert.match(prompt, /PASS\/FAIL\/NOT RUN/);
   assert.match(prompt, /IN PROGRESS — provisional cloud execution/);
   assert.match(prompt, /لا تمنح نفسك `CLOSED 8\/10`/);
+  assert.match(prompt, /MASTER_CLOUD_DEVELOPMENT_WORK_ORDER_AR\.md` كاملًا/);
+  assert.match(prompt, /PROJECT_CHARTER_AR\.md` كاملًا/);
+  assert.match(prompt, /إيصال قراءة/);
+  assert.match(prompt, /RECOVER:/);
+  assert.match(prompt, /DEFINE:/);
+  assert.match(prompt, /BASELINE:/);
+  assert.match(prompt, /IMPLEMENT:/);
+  assert.match(prompt, /VERIFY:/);
+  assert.match(prompt, /INSPECT:/);
+  assert.match(prompt, /HANDOVER:/);
+  assert.match(prompt, /ADVANCE:/);
 });
 
 test('active and master work orders point to F1 and the detailed authority', () => {
@@ -51,6 +62,8 @@ test('every remaining feature has a token-bounded file read pack', () => {
   assert.match(readPacks, /الحد الأولي: 12 ملفًا و40,000 حرف/);
   assert.match(readPacks, /يحظر فتح `src\/App\.tsx` أو/);
   assert.match(readPacks, /package-lock\.json/);
+  assert.match(readPacks, /CODEX_F1_F2_VERIFICATION_2026-09-07\.md` — قسم F1 فقط/);
+  assert.match(readPacks, /CODEX_F1_F2_VERIFICATION_2026-09-07\.md` — قسم F2 فقط/);
   assert.match(specification, /FEATURE_READ_PACKS_AR\.md/);
   assert.match(prompt, /FEATURE_READ_PACKS_AR\.md/);
   assert.match(master, /FEATURE_READ_PACKS_AR\.md/);
