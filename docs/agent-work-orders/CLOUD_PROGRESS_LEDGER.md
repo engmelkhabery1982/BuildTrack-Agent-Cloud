@@ -8,7 +8,7 @@
 - Official reviewed C2 feature commit: `4d04d8de92e8bfaf7ca845c81b0108b54284781e`
 - Agent-cloud C2 synchronization commit: `8d22f5295bb491ec5c31e70d8db2940ad4ae0090`
 - Current capability: `F1 — Labor Timesheet Approval & Actual-Cost Posting`
-- Status: `NEXT — not started`
+- Status: `REPAIR REQUIRED — agent draft exists; not accepted; F2 is staged and must wait`
 - Last accepted capability: `E3 — Controlled Reproducible Report Pack (Codex-repaired, reviewed and gate-tested)`
 - Official repository: `engmelkhabery1982/Build-Track-PM-App-`
 - Writable agent repository only: `engmelkhabery1982/BuildTrack-Agent-Cloud`
@@ -39,6 +39,22 @@
 - Exact next feature: F1. Do not repeat C4/D1/D2/D3/D4/E1/E2/E3.
 - Detailed execution authority for F1 through H1:
   `docs/agent-work-orders/NEXT_FEATURES_DETAILED_EXECUTION_AR.md`.
+
+## Codex verification — agent F1/F2 drafts (2026-09-07)
+
+- Reviewed commits: `6b70fb0` (F1) and `fce8482` (F2).
+- Kept: SQL entities, TypeScript/data mappings, calculation/validation helpers,
+  Rust command skeletons, and initial tests.
+- Immediate repair already applied: F2 Rust compile error at reversal-period query;
+  restored canonical npm lockfile and removed unrequested Bun/AI-Studio artifacts.
+- F1 is not 8/10: production UI does not invoke workflow commands; Submitted command
+  is absent; Approve/Post can skip lifecycle stages; generic CRUD is not guarded;
+  audit and complete calendar/scope/locked-reversal reconciliation are absent.
+- F2 is not 8/10: same UI/lifecycle/generic-CRUD/audit gaps; posting uses replace/upsert
+  semantics; equipment mutation immutability is incomplete.
+- Exact next action: repair and gate F1 using its section in
+  `FEATURE_READ_PACKS_AR.md`; do not start F3 and do not claim F2 accepted.
+- Full evidence: `docs/agent-results/CODEX_F1_F2_VERIFICATION_2026-09-07.md`.
 
 ## تحديث التسليم — E2
 

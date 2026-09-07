@@ -18,21 +18,21 @@
 نفذ هذا قبل اقتراح أو تعديل أي كود:
 
 1. Pull آخر `main` من Agent Cloud وتحقق من HEAD وworking tree.
-2. اقرأ كاملًا وبالترتيب:
-   - `AGENTS.md`
-   - `docs/agent-work-orders/CLOUD_PROGRESS_LEDGER.md`
-   - `docs/agent-work-orders/PROJECT_CHARTER_AR.md`
-   - هذا الملف.
-   - `docs/agent-work-orders/NEXT_FEATURES_DETAILED_EXECUTION_AR.md`
-   - `docs/FEATURE_CATALOG_37_AND_CONTINUATION_AR.md`
-   - `docs/SAP_OPERATIONAL_CONTROL_ROADMAP_AR.md`
-   - نتيجة الميزة السابقة تحت `docs/agent-results/`.
+2. لا تقرأ المشروع أو المراجع كاملة. اقرأ `AGENTS.md`، ثم قسم الحالة الحالية فقط
+   من `docs/agent-work-orders/CLOUD_PROGRESS_LEDGER.md`، ثم قسم الميزة النشطة فقط
+   من `docs/agent-work-orders/NEXT_FEATURES_DETAILED_EXECUTION_AR.md`، ثم حزمة
+   `MUST READ` الخاصة بها في `docs/agent-work-orders/FEATURE_READ_PACKS_AR.md`.
+   لا تفتح Charter أو Feature Catalog أو SAP Roadmap أو تقارير قديمة إلا إذا سمت
+   حزمة الميزة الملف/القسم صراحة. ابحث بـ`rg` وافتح المقاطع المطابقة فقط.
 3. افحص آخر 10 commits وأي diff غير مكتمل للميزة النشطة.
 4. شغّل اختبارات الأساس قبل التعديل. إذا كانت فاشلة، سجل الفشل ولا تخفّض اختبارًا.
 5. اكتب في رد البداية: HEAD، الميزة النشطة، الموجود منها، الناقص، الملفات المتوقعة،
    ومصدر الحقيقة. لا تطلب من المستخدم إعادة شرح المشروع.
 6. أكمل الميزة المسجلة في `CLOUD_PROGRESS_LEDGER.md` من آخر نقطة. ممنوع اختيار ميزة
    أخرى أو إعادة عمل جزء موجود لأن محادثتك لا تتذكره.
+7. الحد الأولي للقراءة 12 ملفًا و40,000 حرف. قبل تجاوزه سجل في تقرير الميزة اسم
+   الرمز والملف الإضافي وسبب عدم كفاية حزمة القراءة. فتح `App.tsx` أو `lib.rs` أو
+   `types/index.ts` كاملًا مخالفة لأمر العمل.
 
 عند اختلاف حالة قديمة في Roadmap أو تقرير سابق، يكون ترتيب السلطة:
 `CLOUD_PROGRESS_LEDGER.md` ثم هذا الأمر ثم `ACTIVE.md` ثم Feature Catalog ثم Roadmap.

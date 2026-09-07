@@ -17,13 +17,13 @@
 قبل أي تعديل:
 
 1. اسحب آخر `main` وتحقق من HEAD ومن نظافة working tree.
-2. اقرأ كاملًا وبالترتيب: `AGENTS.md`، ثم
-   `docs/agent-work-orders/CLOUD_PROGRESS_LEDGER.md`، ثم
-   `docs/agent-work-orders/PROJECT_CHARTER_AR.md`، ثم
-   `docs/agent-work-orders/MASTER_CLOUD_DEVELOPMENT_WORK_ORDER_AR.md`، ثم
-   `docs/agent-work-orders/NEXT_FEATURES_DETAILED_EXECUTION_AR.md`، ثم سجل الميزات
-   وخارطة SAP والنتيجة السابقة المشار إليها في سجل الاستمرار. المواصفة التفصيلية
-   ملزمة، ولا يكفي عنوان الميزة أو ملخص Feature Catalog.
+2. طبّق القراءة المقيّدة لتوفير التوكنز: اقرأ `AGENTS.md`، ثم **قسم الحالة الحالية
+   فقط** من `docs/agent-work-orders/CLOUD_PROGRESS_LEDGER.md`، ثم **قسم الميزة
+   النشطة فقط** من `docs/agent-work-orders/NEXT_FEATURES_DETAILED_EXECUTION_AR.md`،
+   ثم حزمة الميزة نفسها من
+   `docs/agent-work-orders/FEATURE_READ_PACKS_AR.md`. لا تقرأ Master/Charter/
+   Feature Catalog/SAP Roadmap أو تقارير الميزات القديمة كاملة. ارجع إلى بند محدد
+   منها فقط إذا أحالت إليه حزمة القراءة صراحة.
 3. افحص آخر commits والكود والاختبارات لتحديد الموجود فعليًا. لا تفترض أن وصف
    المحادثة أو تقرير وكيل سابق صحيح دون دليل من الملفات.
 4. أعلن فهمًا قصيرًا يتضمن: HEAD، الميزة النشطة من سجل الاستمرار، ما تم منها، ما
@@ -35,6 +35,9 @@
    ملفات توليد/توثيق خارج الميزة، إلا إذا نص أمر الميزة عليها صراحة.
 7. قبل كتابة الكود أنشئ checklist داخل تقرير الميزة ينسخ كل بند من: النتيجة
    التشغيلية، التنفيذ المطلوب، وبوابة القبول. لا تحذف بندًا أو تستبدله بعبارة عامة.
+8. ابدأ البحث بـ`rg` داخل الملفات المحددة، وافتح المقاطع المطابقة فقط. يحظر قراءة
+   `App.tsx` أو `lib.rs` أو `types/index.ts` كاملًا. الحد الأولي 12 ملفًا و40,000
+   حرف؛ وكل توسع يحتاج سببًا مسجلًا في تقرير الميزة قبل القراءة.
 
 قائمة الحذف لكل الميزات الحالية `DELETE_ALLOWLIST: []`. لذلك أي `D` أو `R` يظهر في
 `git diff --name-status START_HEAD..HEAD` خطأ يجب استرجاعه قبل commit. ممنوع حذف أو

@@ -589,7 +589,7 @@ pub async fn reverse_equipment_log(
         .bind(&log.project_id)
         .bind(&request.reversed_at)
         .bind(&request.reversed_at)
-        .fetch_one(&mut **tx)
+        .fetch_one(&mut *tx)
         .await
         .map_err(|e| e.to_string())?;
 
