@@ -7,6 +7,7 @@ import {
   Trash2, AlertOctagon, HelpCircle as HelpIcon, Edit, Filter, ListCollapse, ListTree
 } from 'lucide-react';
 import { useData } from '@/hooks/useData';
+import { useProjectDataDate } from '@/context/ProjectDataDateContext';
 import { dataRepository } from '@/data';
 import type { Project, Cost, CostEntry, BOQItem, WBSNode, CostCode, ReportingPeriod, VarianceActionItem } from '@/types';
 
@@ -28,6 +29,7 @@ interface TreeNode {
   actual: number;
   etc: number;
   fac: number;
+  forecastComplete: boolean;
   category?: string;
   itemCode?: string;
   vendor?: string;
@@ -53,9 +55,13 @@ export function CostVarianceDrillDownModal({
     reportingPeriods,
     estimateVersions,
     controlAccounts,
+    costPlanVersions,
+    procurement,
+    varianceActions,
     applyLocalMutation,
     reload,
   } = useData();
+  const { dataDate } = useProjectDataDate();
 
   // Active Project Selection
   const [projectId, setProjectId] = useState<string>(selectedProjectId || '');
@@ -93,19 +99,14 @@ export function CostVarianceDrillDownModal({
       setExpandedNodes({});
       setSearchQuery('');
       
-      // Load any existing actionable reasons saved in localStorage to simulate persistent DB notes for these nodes
-      const stored = localStorage.getItem(`variance_reasons_${selectedProjectId || projectId}`);
-      if (stored) {
-        try {
-          setLocalReasons(JSON.parse(stored));
-        } catch {
-          setLocalReasons({});
-        }
-      } else {
-        setLocalReasons({});
-      }
+      const scopeId = selectedProjectId || projectId;
+      setLocalReasons(Object.fromEntries(
+        varianceActions
+          .filter((item) => item.project_id === scopeId && item.source_kpi === 'Cost Variance Reason' && item.source_record_id)
+          .map((item) => [String(item.source_record_id), String(item.comments || '')]),
+      ));
     }
-  }, [isOpen, selectedProjectId, projectId]);
+  }, [isOpen, selectedProjectId, projectId, varianceActions]);
 
   // Derived filtered active project
   const currentProject = useMemo(() => {
@@ -126,8 +127,8 @@ export function CostVarianceDrillDownModal({
 
   // Find cost entries of current project
   const projectCostEntries = useMemo(() => {
-    return costEntries.filter(ce => ce.project_id === projectId);
-  }, [costEntries, projectId]);
+    return costEntries.filter(ce => ce.project_id === projectId && (!ce.date || ce.date <= dataDate));
+  }, [costEntries, projectId, dataDate]);
 
   // Find costs (Cost Control Master records) of current project
   const projectCosts = useMemo(() => {
@@ -157,14 +158,46 @@ export function CostVarianceDrillDownModal({
     return map;
   }, [costCodes]);
 
-  // Save actionable reasons securely to localStorage or database
-  const saveActionableReason = (nodeId: string, reason: string) => {
-    const updated = { ...localReasons, [nodeId]: reason };
-    setLocalReasons(updated);
-    localStorage.setItem(`variance_reasons_${projectId}`, JSON.stringify(updated));
-    setEditingReasonNodeId(null);
-    setSuccessMessage('تم حفظ مبرر الانحراف القابل للتصرف بنجاح.');
-    setTimeout(() => setSuccessMessage(''), 3000);
+  // Persist reasons in the governed SQLite-backed variance action register.
+  const saveActionableReason = async (nodeId: string, reason: string) => {
+    const normalizedReason = reason.trim();
+    if (!normalizedReason) {
+      setErrorMessage('Variance reason cannot be empty.');
+      return;
+    }
+    setIsProcessing(true);
+    setErrorMessage('');
+    try {
+      const existing = varianceActions.find((item) => item.project_id === projectId
+        && item.source_kpi === 'Cost Variance Reason' && item.source_record_id === nodeId);
+      if (existing) {
+        const updated = await dataRepository.update<VarianceActionItem>('variance_actions', existing.id, {
+          comments: normalizedReason,
+          updated_at: new Date().toISOString(),
+        });
+        applyLocalMutation('variance_actions', { type: 'update', row: updated });
+      } else {
+        const createdAt = new Date().toISOString();
+        const created: VarianceActionItem = {
+          id: crypto.randomUUID(), project_id: projectId, contract_id: null,
+          source_kpi: 'Cost Variance Reason', source_record_id: nodeId,
+          warningMessage: 'Documented cost variance reason', category: 'Cost', severity: 'Medium',
+          materiality: 0, assignedTo: '', dueDate: createdAt.slice(0, 10), status: 'Open',
+          comments: normalizedReason, evidence: '', escalation_level: 0,
+          escalation_history: '[]', createdDate: createdAt.slice(0, 10), created_at: createdAt, updated_at: createdAt,
+        };
+        const inserted = await dataRepository.insert<VarianceActionItem>('variance_actions', created);
+        applyLocalMutation('variance_actions', { type: 'insert', row: inserted });
+      }
+      setLocalReasons((current) => ({ ...current, [nodeId]: normalizedReason }));
+      setEditingReasonNodeId(null);
+      setSuccessMessage('تم حفظ مبرر الانحراف في سجل الإجراءات المحكوم.');
+      setTimeout(() => setSuccessMessage(''), 3000);
+    } catch (error: any) {
+      setErrorMessage(error?.message || 'Failed to save the governed variance reason.');
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   // Helper function to extract period based on entry date
@@ -412,84 +445,76 @@ export function CostVarianceDrillDownModal({
 
 
   // 4. THE DRILL-DOWN VARIANCE TREE CONSTRUCTOR
-  // Groups data dynamically using the selected grouping order: WBS -> CBS -> Vendor -> Period
+  // One governed leaf per Control Account.  Budget, actual, commitment and
+  // forecast are deliberately read from their authoritative ledgers rather
+  // than from the denormalized `costs` summary table.
   const varianceTree = useMemo(() => {
-    // 1. Prepare raw items with rich metadata
-    // We map every active projectCost line
-    const rawItems = projectCosts.map(cost => {
-      const budget = Number(cost.budget) || 0;
-      const committed = Number(cost.committed) || 0;
-      const actual = Number(cost.actual) || 0;
+    const scopedAccounts = controlAccounts.filter(account => account.project_id === projectId && account.status !== 'Inactive');
+    const accountCountByBoq = new Map<string, number>();
+    scopedAccounts.forEach(account => accountCountByBoq.set(account.boq_item_id, (accountCountByBoq.get(account.boq_item_id) || 0) + 1));
 
-      // Find matching estimate to complete (ETC) if there is an approved version
-      // In D2, estimateLines have etc and fac
-      let etc = Math.max(0, budget - actual); // default fallback
-      let fac = actual + etc;
+    const belongsToAccount = (row: { control_account_id?: string | null; boq_item_id?: string | null }, accountId: string, boqItemId: string) =>
+      String(row.control_account_id || '') === accountId
+      || (!row.control_account_id && String(row.boq_item_id || '') === boqItemId && accountCountByBoq.get(boqItemId) === 1);
 
-      // Attempt to retrieve actual approved forecast version lines
-      const activeVersion = estimateVersions.find(v => v.project_id === projectId && v.status === 'Approved');
-      if (activeVersion && activeVersion.lines) {
-        // Find matching estimate line via control account
-        const controlAcc = (controlAccounts as any[]).find((ca: any) => ca.id === cost.id || ca.cost_code_id === cost.id);
-        if (controlAcc) {
-          const matchedLine = activeVersion.lines.find(l => l.control_account_id === controlAcc.id);
-          if (matchedLine) {
-            etc = Number(matchedLine.etc) || 0;
-            fac = Number(matchedLine.fac) || (actual + etc);
-          }
-        }
-      }
+    const periodForDate = (value?: string | null) => projectPeriods.find(period => {
+      if (!value || !period.start_date || !period.end_date) return false;
+      return value >= period.start_date && value <= period.end_date;
+    });
 
-      // Identify corresponding WBS
-      let wbsId = 'unmapped-wbs';
-      let wbsName = 'غير مرتبط بهيكل العمل WBS';
-      
-      const controlAcc = (controlAccounts as any[]).find((ca: any) => ca.id === cost.id || ca.cost_code_id === cost.id);
-      if (controlAcc && controlAcc.wbs_id) {
-        wbsId = controlAcc.wbs_id;
-        const wNode = wbsMap.get(wbsId);
-        wbsName = wNode ? `${wNode.wbs_code} — ${wNode.name}` : wbsId;
-      } else if (cost.boq_item_id) {
-        // Check if BOQ item has a WBS link
-        const boqItem = projectBOQItems.find(b => b.id === cost.boq_item_id);
-        if (boqItem && (boqItem as any).wbs_id) {
-          wbsId = (boqItem as any).wbs_id;
-          const wNode = wbsMap.get(wbsId);
-          wbsName = wNode ? `${wNode.wbs_code} — ${wNode.name}` : wbsId;
-        }
-      }
+    const rawItems = scopedAccounts.map(account => {
+      const boqItem = projectBOQItems.find(item => item.id === account.boq_item_id);
+      const legacyCost = projectCosts.find(cost => cost.boq_item_id === account.boq_item_id);
+      const approvedPlan = costPlanVersions
+        .filter(version => version.project_id === projectId
+          && version.control_account_id === account.id
+          && version.status === 'Approved'
+          && version.data_date <= dataDate)
+        .sort((a, b) => String(b.approved_at || b.updated_at).localeCompare(String(a.approved_at || a.updated_at)))[0];
 
-      // Identify CBS / Cost Code
-      let cbsId = 'unmapped-cbs';
-      let cbsName = 'غير مرتبط بدليل التكلفة CBS';
-      if (cost.item_code) {
-        cbsId = cost.item_code;
-        cbsName = `${cost.item_code} — ${cost.boq_item_name || cost.description}`;
-      }
+      const actual = projectCostEntries
+        .filter(entry => belongsToAccount(entry, account.id, account.boq_item_id))
+        .reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
 
-      // Identify Vendor
-      const vendorName = cost.company_name || 'Direct Delivery / No Vendor';
+      const accountOrders = procurement.filter(order => order.project_id === projectId
+        && (!order.order_date || order.order_date <= dataDate)
+        && !['Draft', 'Cancelled', 'Canceled', 'Rejected'].includes(String(order.status || ''))
+        && belongsToAccount(order, account.id, account.boq_item_id));
+      const committed = accountOrders.reduce((sum, order) => sum + (Number(order.total_cost) || 0), 0);
 
-      // Identify Period
-      // Map cost entries of this item to periods to find representative period, or fallback to date
-      const periodName = cost.notes && cost.notes.includes('Period:') ? cost.notes.split('Period:')[1].trim() : 'No Period';
+      const approvedEstimate = estimateVersions
+        .filter(version => version.project_id === projectId
+          && version.control_account_id === account.id
+          && version.status === 'Approved'
+          && version.data_date <= dataDate)
+        .sort((a, b) => String(b.approved_at || b.updated_at).localeCompare(String(a.approved_at || a.updated_at)))[0];
+      const estimateLine = approvedEstimate?.lines?.find(line => line.control_account_id === account.id);
+      const forecastComplete = Boolean(estimateLine);
+      const etc = estimateLine ? Number(estimateLine.etc) || 0 : 0;
+      const fac = estimateLine ? Number(estimateLine.fac) || 0 : 0;
+
+      const wNode = wbsMap.get(account.wbs_id);
+      const costCode = costCodeMap.get(account.cost_code_id);
+      const suppliers = [...new Set(accountOrders.map(order => String(order.supplier || '').trim()).filter(Boolean))];
+      const forecastPeriod = periodForDate(approvedEstimate?.data_date || dataDate);
 
       return {
-        id: cost.id,
-        itemCode: cost.item_code,
-        itemName: cost.boq_item_name || cost.description,
-        category: cost.category || 'Other',
-        budget,
+        id: account.id,
+        itemCode: boqItem?.item_code || account.control_account_code,
+        itemName: boqItem?.description || account.description || account.title || account.control_account_code,
+        category: costCode?.classification || legacyCost?.category || 'Other',
+        budget: Number(approvedPlan?.delivery_cost_bac) || 0,
         committed,
         actual,
         etc,
         fac,
-        wbsId,
-        wbsName,
-        cbsId,
-        cbsName,
-        vendor: vendorName,
-        periodName,
+        forecastComplete,
+        wbsId: account.wbs_id || 'unmapped-wbs',
+        wbsName: wNode ? `${wNode.wbs_code} — ${wNode.name}` : 'غير مرتبط بهيكل العمل WBS',
+        cbsId: account.cost_code_id || 'unmapped-cbs',
+        cbsName: costCode ? `${costCode.cost_code} — ${costCode.name}` : 'غير مرتبط بدليل التكلفة CBS',
+        vendor: suppliers.length === 0 ? 'Direct Delivery / No Vendor' : suppliers.length === 1 ? suppliers[0] : 'Multiple Vendors',
+        periodName: forecastPeriod?.period_name || 'No Reporting Period',
       };
     });
 
@@ -512,6 +537,7 @@ export function CostVarianceDrillDownModal({
       actual: 0,
       etc: 0,
       fac: 0,
+      forecastComplete: true,
       children: {}
     };
 
@@ -531,6 +557,7 @@ export function CostVarianceDrillDownModal({
       current.actual += item.actual;
       current.etc += item.etc;
       current.fac += item.fac;
+      current.forecastComplete = current.forecastComplete && item.forecastComplete;
 
       groupingOrder.forEach((level, idx) => {
         const { id: gId, name: gName } = getGroupValueAndName(item, level);
@@ -545,6 +572,7 @@ export function CostVarianceDrillDownModal({
             actual: 0,
             etc: 0,
             fac: 0,
+            forecastComplete: true,
             children: {}
           };
         }
@@ -555,6 +583,7 @@ export function CostVarianceDrillDownModal({
         childNode.actual += item.actual;
         childNode.etc += item.etc;
         childNode.fac += item.fac;
+        childNode.forecastComplete = childNode.forecastComplete && item.forecastComplete;
 
         // If last grouping, append leaf
         if (idx === groupingOrder.length - 1) {
@@ -568,6 +597,7 @@ export function CostVarianceDrillDownModal({
             actual: item.actual,
             etc: item.etc,
             fac: item.fac,
+            forecastComplete: item.forecastComplete,
             category: item.category,
             itemCode: item.itemCode,
             vendor: item.vendor,
@@ -582,7 +612,7 @@ export function CostVarianceDrillDownModal({
     });
 
     return root;
-  }, [projectCosts, estimateVersions, controlAccounts, projectBOQItems, wbsMap, currentProject, groupingOrder, searchQuery, localReasons]);
+  }, [controlAccounts, projectId, projectPeriods, projectBOQItems, projectCosts, costPlanVersions, dataDate, projectCostEntries, procurement, estimateVersions, wbsMap, costCodeMap, currentProject, groupingOrder, searchQuery, localReasons]);
 
 
   // Format currency helpers
@@ -629,7 +659,7 @@ export function CostVarianceDrillDownModal({
     // Calculations
     const commitmentVariance = node.budget - node.committed;
     const actualVariance = node.committed - node.actual;
-    const vac = node.budget - node.fac; // Variance At Completion (Favorable if positive)
+    const vac = node.forecastComplete ? node.budget - node.fac : null; // unavailable until an approved D2 forecast exists
 
     // Check query filter compatibility
     const showRow = node.id !== 'root';
@@ -668,8 +698,8 @@ export function CostVarianceDrillDownModal({
             <td className="py-3 px-4 text-right text-sm text-slate-700 font-mono">${formatVal(node.budget)}</td>
             <td className="py-3 px-4 text-right text-sm text-slate-700 font-mono">${formatVal(node.committed)}</td>
             <td className="py-3 px-4 text-right text-sm text-slate-700 font-mono">${formatVal(node.actual)}</td>
-            <td className="py-3 px-4 text-right text-sm text-slate-700 font-mono">${formatVal(node.etc)}</td>
-            <td className="py-3 px-4 text-right text-sm text-slate-700 font-mono">${formatVal(node.fac)}</td>
+            <td className="py-3 px-4 text-right text-sm text-slate-700 font-mono">{node.forecastComplete ? `$${formatVal(node.etc)}` : 'غير متاح'}</td>
+            <td className="py-3 px-4 text-right text-sm text-slate-700 font-mono">{node.forecastComplete ? `$${formatVal(node.fac)}` : 'غير متاح'}</td>
             
             {/* Variance columns */}
             <td className="py-3 px-4 text-right font-mono">
@@ -683,15 +713,15 @@ export function CostVarianceDrillDownModal({
               </span>
             </td>
             <td className="py-3 px-4 text-right font-mono">
-              <span className={`px-2 py-1 text-xs rounded border ${getVarianceColor(vac)}`}>
-                {formatWithSign(vac)}
+              <span className={`px-2 py-1 text-xs rounded border ${vac === null ? 'bg-slate-100 text-slate-500 border-slate-200' : getVarianceColor(vac)}`}>
+                {vac === null ? 'غير متاح' : formatWithSign(vac)}
               </span>
             </td>
 
             {/* Actions & Alerts */}
             <td className="py-3 px-4 text-center">
               <div className="flex items-center justify-center gap-2">
-                {vac < 0 ? getOverrunBadge(vac) : <span className="text-xs text-slate-400">-</span>}
+                {vac !== null && vac < 0 ? getOverrunBadge(vac) : <span className="text-xs text-slate-400">-</span>}
                 
                 {/* Editable actionable reason */}
                 {node.type === 'leaf' && (
@@ -1023,8 +1053,8 @@ export function CostVarianceDrillDownModal({
                         <td className="py-4 px-4 text-right font-mono text-sm">${formatVal(varianceTree.budget)}</td>
                         <td className="py-4 px-4 text-right font-mono text-sm">${formatVal(varianceTree.committed)}</td>
                         <td className="py-4 px-4 text-right font-mono text-sm">${formatVal(varianceTree.actual)}</td>
-                        <td className="py-4 px-4 text-right font-mono text-sm">${formatVal(varianceTree.etc)}</td>
-                        <td className="py-4 px-4 text-right font-mono text-sm">${formatVal(varianceTree.fac)}</td>
+                        <td className="py-4 px-4 text-right font-mono text-sm">{varianceTree.forecastComplete ? `$${formatVal(varianceTree.etc)}` : 'غير متاح'}</td>
+                        <td className="py-4 px-4 text-right font-mono text-sm">{varianceTree.forecastComplete ? `$${formatVal(varianceTree.fac)}` : 'غير متاح'}</td>
                         
                         {/* Variances */}
                         <td className="py-4 px-4 text-right font-mono text-sm">
@@ -1038,12 +1068,14 @@ export function CostVarianceDrillDownModal({
                           </span>
                         </td>
                         <td className="py-4 px-4 text-right font-mono text-sm">
-                          <span className={`px-2 py-1 text-xs rounded border ${getVarianceColor(varianceTree.budget - varianceTree.fac)}`}>
-                            {formatWithSign(varianceTree.budget - varianceTree.fac)}
+                          <span className={`px-2 py-1 text-xs rounded border ${varianceTree.forecastComplete ? getVarianceColor(varianceTree.budget - varianceTree.fac) : 'bg-slate-100 text-slate-500 border-slate-200'}`}>
+                            {varianceTree.forecastComplete ? formatWithSign(varianceTree.budget - varianceTree.fac) : 'غير متاح'}
                           </span>
                         </td>
                         <td className="py-4 px-4 text-center">
-                          {varianceTree.budget - varianceTree.fac < 0 ? (
+                          {!varianceTree.forecastComplete ? (
+                            <span className="px-2.5 py-0.5 text-xs font-bold bg-slate-200 text-slate-600 rounded">Forecast غير معتمد</span>
+                          ) : varianceTree.budget - varianceTree.fac < 0 ? (
                             <span className="px-2.5 py-0.5 text-xs font-bold bg-rose-600 text-white rounded">تجاوز إجمالي</span>
                           ) : (
                             <span className="px-2.5 py-0.5 text-xs font-bold bg-emerald-600 text-white rounded">ميزانية آمنة</span>

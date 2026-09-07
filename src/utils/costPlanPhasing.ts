@@ -60,31 +60,42 @@ export function generateCostPlanPeriods(
     throw new Error('Delivery Cost BAC must be a valid positive number. Revenue BAC cannot be used as cost plan.');
   }
 
-  const start = new Date(startDate);
-  const end = new Date(endDate);
-  if (isNaN(start.getTime()) || isNaN(end.getTime()) || start >= end) {
-    throw new Error('Invalid cost plan date range: start date must be strictly before end date.');
+  const parseIsoDate = (value: string) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+    const parsed = new Date(`${value}T00:00:00.000Z`);
+    return Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value ? null : parsed;
+  };
+  const iso = (value: Date) => value.toISOString().slice(0, 10);
+  const addUtcDays = (value: Date, days: number) => new Date(value.getTime() + days * 86_400_000);
+  const start = parseIsoDate(startDate);
+  const end = parseIsoDate(endDate);
+  if (!start || !end || start > end) {
+    throw new Error('Invalid cost plan date range: use valid ISO dates and keep start on or before end.');
   }
 
-  // Determine period boundaries
-  let periodsCount = params.periodsCount || 0;
-  if (!periodsCount || periodsCount <= 0) {
-    const diffMonths = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth()) + 1;
-    periodsCount = Math.max(1, diffMonths);
-  }
-
-  // Generate period dates
+  // Generate real calendar periods. Frequency is a governing input; it must not
+  // be represented by equal millisecond slices that drift across month boundaries.
   const periodRanges: Array<{ start: string; end: string }> = [];
-  const totalDurationMs = end.getTime() - start.getTime();
-  const stepMs = totalDurationMs / periodsCount;
+  const frequency = params.frequency || 'monthly';
+  let cursor = new Date(start);
+  while (cursor <= end) {
+    let boundary: Date;
+    if (frequency === 'weekly') {
+      boundary = addUtcDays(cursor, 6);
+    } else if (frequency === 'quarterly') {
+      const quarterEndMonth = Math.floor(cursor.getUTCMonth() / 3) * 3 + 3;
+      boundary = new Date(Date.UTC(cursor.getUTCFullYear(), quarterEndMonth, 0));
+    } else {
+      boundary = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 0));
+    }
+    const periodEnd = boundary < end ? boundary : end;
+    periodRanges.push({ start: iso(cursor), end: iso(periodEnd) });
+    cursor = addUtcDays(periodEnd, 1);
+  }
+  const periodsCount = periodRanges.length;
 
-  for (let i = 0; i < periodsCount; i++) {
-    const pStart = new Date(start.getTime() + i * stepMs);
-    const pEnd = i === periodsCount - 1 ? end : new Date(start.getTime() + (i + 1) * stepMs - 86400000);
-    periodRanges.push({
-      start: pStart.toISOString().slice(0, 10),
-      end: pEnd.toISOString().slice(0, 10),
-    });
+  if (params.periodsCount && params.periodsCount !== periodsCount) {
+    throw new Error(`Requested periodsCount (${params.periodsCount}) does not match ${frequency} calendar periods (${periodsCount}).`);
   }
 
   // Calculate raw weights or use manual costs

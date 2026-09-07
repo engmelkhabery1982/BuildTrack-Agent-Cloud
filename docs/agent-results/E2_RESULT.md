@@ -2,7 +2,7 @@
 
 ## Overview
 Implemented Feature **E2 — Persistent Variance Action Register with Corrective Evidence & Governance Escalation Log**.
-This feature establishes a durable, SQLite-backed action queue that links variances and material exceptions to assigned owners, due dates, status lifecycle states (`Open` -> `In Progress` -> `Closed`), mandatory corrective evidence before resolution, and immutable local governance escalation logs.
+This feature establishes a durable, SQLite-backed action queue that links variances and material exceptions to assigned owners, due dates, status lifecycle states (`Open` -> `Assigned` -> `In Progress` -> `Resolved` -> `Closed`), mandatory resolution and corrective evidence before closure, and immutable local governance escalation logs.
 
 ## Implemented Work Items & Key Capabilities
 1. **Durable SQLite Entity & Repository Mapping**:
@@ -12,7 +12,7 @@ This feature establishes a durable, SQLite-backed action queue that links varian
 
 2. **Workflows & Governance Rules**:
    - Implemented `useVarianceActions` hook and `varianceActionRegister` utility.
-   - Enforced **Mandatory Evidence Rule**: The system strictly disallows setting an action status to `Closed` without providing text/document evidence or inspection references.
+   - Enforced **Lifecycle and Evidence Rules** in both the UI hook and SQLite: invalid transitions are rejected; `Resolved` requires a resolution comment; `Closed` requires resolution and evidence.
    - Implemented **Local Governance Escalation**: Provides Level 1 (PM), Level 2 (Director), and Level 3 (Executive) escalation controls with reason logging and immutable audit trail.
    - Implemented **Duplicate Prevention**: Prevents creating duplicate actions for the same warning or source record trigger.
 
@@ -29,5 +29,6 @@ This feature establishes a durable, SQLite-backed action queue that links varian
 ## Verification & Acceptance Results
 - `npm run lint`: Clean (0 errors).
 - `compile_applet`: Clean production build succeeded.
-- `npm test`: 171/171 tests passed.
+- `npm test`: 181/181 tests passed after Codex integration review.
+- `cargo test`: 27/27 tests passed.
 - SQLite persistence & schema migration verified.

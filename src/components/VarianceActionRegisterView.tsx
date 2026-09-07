@@ -37,7 +37,7 @@ interface VarianceActionRegisterViewProps {
   ) => Promise<any>;
   onUpdateActionStatus: (
     id: string,
-    status: 'Open' | 'In Progress' | 'Closed',
+    status: 'Open' | 'Assigned' | 'In Progress' | 'Resolved' | 'Closed',
     evidence?: string,
     comments?: string
   ) => Promise<any>;
@@ -61,7 +61,7 @@ export function VarianceActionRegisterView({
 
   // Selected Action Modal / Drawer State
   const [activeAction, setActiveAction] = useState<VarianceActionItem | null>(null);
-  const [statusDraft, setStatusDraft] = useState<'Open' | 'In Progress' | 'Closed'>('Open');
+  const [statusDraft, setStatusDraft] = useState<'Open' | 'Assigned' | 'In Progress' | 'Resolved' | 'Closed'>('Open');
   const [evidenceInput, setEvidenceInput] = useState<string>('');
   const [commentInput, setCommentInput] = useState<string>('');
   const [escalateReason, setEscalateReason] = useState<string>('');
@@ -276,7 +276,9 @@ export function VarianceActionRegisterView({
           >
             <option value="all">جميع الحالات</option>
             <option value="Open">مفتوح (Open)</option>
+            <option value="Assigned">مسند (Assigned)</option>
             <option value="In Progress">قيد المعالجة (In Progress)</option>
+            <option value="Resolved">تم الحل (Resolved)</option>
             <option value="Closed">مغلق (Closed)</option>
           </select>
 
@@ -515,8 +517,8 @@ export function VarianceActionRegisterView({
               <label className="block text-xs font-bold text-slate-700">
                 تعديل حالة الإجراء (Lifecycle Transition):
               </label>
-              <div className="grid grid-cols-3 gap-2">
-                {(['Open', 'In Progress', 'Closed'] as const).map((st) => (
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                {(['Open', 'Assigned', 'In Progress', 'Resolved', 'Closed'] as const).map((st) => (
                   <button
                     key={st}
                     type="button"

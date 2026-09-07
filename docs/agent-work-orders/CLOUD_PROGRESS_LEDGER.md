@@ -7,22 +7,36 @@
 
 - Official reviewed C2 feature commit: `4d04d8de92e8bfaf7ca845c81b0108b54284781e`
 - Agent-cloud C2 synchronization commit: `8d22f5295bb491ec5c31e70d8db2940ad4ae0090`
-- Current capability: `E2 — Persistent Variance Action Register`
-- Status: `COMPLETED`
-- Last accepted capability: `E2 — Persistent Variance Action Register (Codex-reviewed and gate-tested)`
+- Current capability: `F1 — Labor Timesheet Approval & Actual-Cost Posting`
+- Status: `NEXT — not started`
+- Last accepted capability: `E3 — Controlled Reproducible Report Pack (Codex-repaired, reviewed and gate-tested)`
 - Official repository: `engmelkhabery1982/Build-Track-PM-App-`
 - Writable agent repository only: `engmelkhabery1982/BuildTrack-Agent-Cloud`
 
 ## آخر نتيجة مثبتة
 
-- `npm test`: 171/171 passed.
-- `cargo test`: Environment container without cargo; tests run in CI/desktop.
-- `npm run build`: passed (`compile_applet` clean).
+- `npm test`: 181/181 passed on the official Windows workspace.
+- `cargo test`: 27/27 passed on the official Windows workspace.
+- `npm run build`: production build passed.
 - linter (`npm run lint`): clean (0 errors).
 - تم إكمال C4 بالكامل وجرى دمج لوحة مطابقة وتسوية كتل Primavera مع الحفظ الذري وقاعدة بيانات SQLite.
 - تم إكمال D1 بالكامل: دمج محرك ومحاذاة التوزيع الزمني لميزانيات حسابات التحكم بالكامل مع واجهة المستخدم.
 - تم إكمال D2 بالكامل: دمج وإعداد نافذة التنبؤات والتقديرات المحوكمة مع قواعد حوكمة EAC Floor.
-- تم إكمال E2 بالكامل: دمج وإعداد سجل إجراءات الانحراف التفاعلي (Variance Action Register) مع حفظ SQLite، منع الإغلاق دون أدلة إثبات، شاشة الحوكمة والترفيع، وتكامله مع شاشة التحكم المشتركة Controls Cockpit.
+- تم إصلاح D3 لمنع الحفظ المباشر لحالات GRN/AP/Settlement المحكومة ومنع مضاعفة التكلفة.
+- تم إصلاح D4 ليقرأ Budget/Commitment/AC/ETC/FAC من Control Account ومصادر D1–D3 حتى Unified Data Date، بلا Forecast مصطنع.
+- تم إصلاح E1 لإزالة EV/WIR الوهمي وربطه بمحرك EVM الموحد وبيانات WIR الحقيقية.
+- تم استكمال E2 بدورة `Open → Assigned → In Progress → Resolved → Closed` وحراسة SQL للأدلة والحل والنطاق.
+- تم استكمال E3 بإصدار ذري، SHA-256، immutability، snapshot موحد لـPDF/Excel، تحقق إعادة الفتح، ونسخة القالب.
+
+## تحديث التسليم — Codex acceptance through E3
+
+- Reviewed source base: `75998b142dd1e2bd881dd088960fdcf6617a562d`.
+- Acceptance date: `2026-09-07`.
+- Automated evidence: 181 JS/TS tests, production build, 27 Rust tests, all passed.
+- Independent local review: D4 PASS; E3 PASS. Reports are stored under `tmp/ollama-reviews/`.
+- Detailed corrections and remaining non-blocking observations:
+  `docs/agent-results/CODEX_D1_E3_INTEGRATION_RESULT.md`.
+- Exact next feature: F1. Do not repeat C4/D1/D2/D3/D4/E1/E2/E3.
 
 ## تحديث التسليم — E2
 

@@ -1,8 +1,8 @@
-import { useMemo, useState } from 'react';
-import { CalendarDays, Printer, Save, Lock, History, CheckCircle2, AlertTriangle, FileCheck, Shield, ChevronRight, Eye, RefreshCw, FileText, ArrowRight } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { CalendarDays, Printer, Save, Lock, History, CheckCircle2, AlertTriangle, FileCheck, Shield, ChevronRight, Eye, RefreshCw, FileText, ArrowRight, Download } from 'lucide-react';
 import { useProjectDataDate } from '@/context/ProjectDataDateContext';
 import { calculateEvmAtDataDate } from '@/utils/evm';
-import type { ReportVersion } from '@/types';
+import type { ReportTemplate, ReportVersion } from '@/types';
 
 const money = (value: number | null | undefined) => {
   if (value === null || value === undefined) return 'Unavailable';
@@ -25,13 +25,13 @@ type ReportPackProps = {
   boqItems: Record<string, any>[];
   baselines?: Record<string, any>[];
   controlAccounts?: Record<string, any>[];
+  costPlanVersions?: Record<string, any>[];
   contractSovLines?: Record<string, any>[];
   procurement?: Record<string, any>[];
   procurementReceipts?: Record<string, any>[];
   reportVersions?: ReportVersion[];
+  reportTemplates?: ReportTemplate[];
   onSaveReportVersion?: (version: Partial<ReportVersion>) => Promise<void>;
-  onUpdateReportVersion?: (id: string, patch: Partial<ReportVersion>) => Promise<void>;
-  onDeleteReportVersion?: (id: string) => Promise<void>;
 };
 
 const packDescriptions: Record<string, string> = {
@@ -47,24 +47,12 @@ const isOnOrBefore = (value: unknown, cutoff: string) => {
 };
 
 async function computeHash(payload: string): Promise<string> {
-  if (typeof crypto !== 'undefined' && crypto.subtle) {
-    try {
-      const encoder = new TextEncoder();
-      const data = encoder.encode(payload);
-      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-      const hashArray = Array.from(new Uint8Array(hashBuffer));
-      return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
-    } catch {
-      // Fallback below
-    }
+  if (typeof crypto === 'undefined' || !crypto.subtle) {
+    throw new Error('SHA-256 is unavailable; the controlled report cannot be issued safely.');
   }
-  let hash = 0;
-  for (let i = 0; i < payload.length; i++) {
-    const char = payload.charCodeAt(i);
-    hash = (hash << 5) - hash + char;
-    hash |= 0;
-  }
-  return `sha256-${Math.abs(hash).toString(16).padStart(16, '0')}`;
+  const hashBuffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(payload));
+  const hex = Array.from(new Uint8Array(hashBuffer)).map((byte) => byte.toString(16).padStart(2, '0')).join('');
+  return `sha256:${hex}`;
 }
 
 export function ReportPack({
@@ -79,13 +67,13 @@ export function ReportPack({
   boqItems,
   baselines = [],
   controlAccounts = [],
+  costPlanVersions = [],
   contractSovLines = [],
   procurement = [],
   procurementReceipts = [],
   reportVersions = [],
+  reportTemplates = [],
   onSaveReportVersion,
-  onUpdateReportVersion,
-  onDeleteReportVersion,
 }: ReportPackProps) {
   const [packType, setPackType] = useState('Weekly Project Review');
   const { dataDate: reportDate, projectId, setProjectId } = useProjectDataDate();
@@ -93,12 +81,14 @@ export function ReportPack({
   // Navigation mode: 'live' or 'versions'
   const [activeTab, setActiveTab] = useState<'live' | 'versions'>('live');
   const [selectedVersion, setSelectedVersion] = useState<ReportVersion | null>(null);
+  const [hashVerification, setHashVerification] = useState<'idle' | 'checking' | 'verified' | 'mismatch'>('idle');
   const [activeSubTab, setActiveSubTab] = useState<'summary' | 'reconciliation'>('summary');
 
   // Modal State for Issue / Save Draft
   const [modalOpen, setModalOpen] = useState(false);
   const [modalAction, setModalAction] = useState<'Draft' | 'Issued'>('Draft');
   const [versionCodeInput, setVersionCodeInput] = useState('');
+  const [templateId, setTemplateId] = useState('');
   const [issuerInput, setIssuerInput] = useState('PMO Lead');
   const [signOffNoteInput, setSignOffNoteInput] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -152,6 +142,7 @@ export function ReportPack({
       boqItems,
       costEntries: scopedCosts,
       controlAccounts: controlAccounts.filter((ca) => contractIds.has(ca.contract_id)),
+      costPlanVersions: costPlanVersions.filter((plan) => contractIds.has(plan.contract_id)),
       contractSovLines,
       procurement,
       procurementReceipts,
@@ -207,7 +198,7 @@ export function ReportPack({
         })),
       },
     };
-  }, [projectId, projects, contracts, variations, schedules, wirs, cashFlow, costEntries, scheduleDistributions, boqItems, baselines, controlAccounts, contractSovLines, procurement, procurementReceipts, reportDate]);
+  }, [projectId, projects, contracts, variations, schedules, wirs, cashFlow, costEntries, scheduleDistributions, boqItems, baselines, controlAccounts, costPlanVersions, contractSovLines, procurement, procurementReceipts, reportDate]);
 
   // Open modal to save or issue report
   const openSaveModal = (action: 'Draft' | 'Issued') => {
@@ -236,18 +227,20 @@ export function ReportPack({
         reportDate,
         metrics: liveData.metrics,
         reconciliation: liveData.reconciliation,
+        template: reportTemplates.find((template) => template.id === templateId) || null,
         generatedAt: new Date().toISOString(),
       };
       const payloadString = JSON.stringify(payloadObj);
       const hash = await computeHash(payloadString);
 
-      const targetProjectId = projectId === 'all' ? (projects[0]?.id || 'all') : projectId;
+      const targetProjectId = projectId === 'all' ? null : projectId;
 
       const newVersion: Partial<ReportVersion> = {
         id: crypto.randomUUID(),
         project_id: targetProjectId,
         data_date: reportDate,
         pack_type: packType,
+        template_id: templateId || null,
         version_code: versionCodeInput.trim(),
         status: modalAction,
         snapshot_hash: hash,
@@ -258,22 +251,8 @@ export function ReportPack({
         created_at: new Date().toISOString(),
       };
 
-      if (onSaveReportVersion) {
-        await onSaveReportVersion(newVersion);
-      }
-
-      // If this is an Issued report, supersede previous Issued reports for this project & pack_type
-      if (modalAction === 'Issued' && onUpdateReportVersion) {
-        const previousIssued = reportVersions.filter(
-          (v) => v.project_id === targetProjectId && v.pack_type === packType && v.status === 'Issued' && v.id !== newVersion.id,
-        );
-        for (const prev of previousIssued) {
-          await onUpdateReportVersion(prev.id, {
-            status: 'Superseded',
-            superseded_by: newVersion.id,
-          });
-        }
-      }
+      if (!onSaveReportVersion) throw new Error('Report persistence is unavailable.');
+      await onSaveReportVersion(newVersion);
 
       setModalOpen(false);
       alert(`Report version ${versionCodeInput} successfully saved as ${modalAction}.`);
@@ -300,11 +279,65 @@ export function ReportPack({
     }
   }, [selectedVersion]);
 
+  useEffect(() => {
+    let cancelled = false;
+    if (!selectedVersion) {
+      setHashVerification('idle');
+      return () => { cancelled = true; };
+    }
+    setHashVerification('checking');
+    void computeHash(selectedVersion.snapshot_payload).then((hash) => {
+      if (!cancelled) setHashVerification(hash === selectedVersion.snapshot_hash ? 'verified' : 'mismatch');
+    }).catch(() => {
+      if (!cancelled) setHashVerification('mismatch');
+    });
+    return () => { cancelled = true; };
+  }, [selectedVersion]);
+
   // Active data to display (either version snapshot or live calculation)
   const displayMetrics = activeTab === 'versions' && activeSnapshot ? activeSnapshot.metrics : liveData.metrics;
   const displayReconciliation = activeTab === 'versions' && activeSnapshot ? activeSnapshot.reconciliation : liveData.reconciliation;
   const displayPackType = activeTab === 'versions' && selectedVersion ? selectedVersion.pack_type : packType;
   const displayReportDate = activeTab === 'versions' && selectedVersion ? selectedVersion.data_date : reportDate;
+  const displayTemplate = activeTab === 'versions' && activeSnapshot
+    ? activeSnapshot.template
+    : reportTemplates.find((template) => template.id === templateId) || null;
+
+  const exportDisplayedSnapshotExcel = async () => {
+    if (selectedVersion && hashVerification !== 'verified') {
+      throw new Error('The controlled snapshot hash is not verified; export is blocked.');
+    }
+    const XLSX = await import('xlsx');
+    const workbook = XLSX.utils.book_new();
+    const summaryRows = Object.entries(displayMetrics || {}).map(([metric, value]) => ({ Metric: metric, Value: value ?? 'Unavailable' }));
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(summaryRows), 'Executive Summary');
+    const sheets: Array<[string, Record<string, any>[]]> = [
+      ['Projects', displayReconciliation?.projects || []],
+      ['Contracts', displayReconciliation?.mainContracts || []],
+      ['Variations', displayReconciliation?.approvedVariations || []],
+      ['Schedule Exceptions', displayReconciliation?.delayedActivities || []],
+    ];
+    sheets.forEach(([name, rows]) => XLSX.utils.book_append_sheet(
+      workbook,
+      XLSX.utils.json_to_sheet(rows.length ? rows : [{ Status: 'No records in controlled snapshot' }]),
+      name,
+    ));
+    const bytes = new Uint8Array(XLSX.write(workbook, { bookType: 'xlsx', type: 'array' }));
+    const safeCode = String(selectedVersion?.version_code || `${displayPackType}-${displayReportDate}`).replace(/[^a-zA-Z0-9_-]+/g, '-');
+    const fileName = `${safeCode}.xlsx`;
+    if ("__TAURI_INTERNALS__" in window) {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke<string>('save_excel_download', { fileName, bytes: Array.from(bytes) });
+      return;
+    }
+    const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = fileName;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
 
   const cards: Array<[string, string | number, boolean?]> = [
     ['Original contract', money(displayMetrics?.original)],
@@ -318,6 +351,16 @@ export function ReportPack({
     ['Delivery Cost EAC', displayMetrics?.hasCostPlan ? money(displayMetrics?.costEac) : 'Unavailable'],
     ['Delayed activities', displayMetrics?.delayed || 0, true],
   ];
+  const cardTemplateFields: Record<string, string> = {
+    'Revenue Planned Value (PV)': 'Planned Value',
+    'Revenue Earned Value (EV)': 'Earned Value',
+    'Delivery Actual Cost (AC)': 'Actual Cost',
+    'Delivery Cost BAC': 'Budget',
+    'Delivery Cost EAC': 'EAC',
+  };
+  const visibleCards = displayTemplate?.selected_fields?.length
+    ? cards.filter(([label]) => !cardTemplateFields[label] || displayTemplate.selected_fields.includes(cardTemplateFields[label]))
+    : cards;
 
   const filteredReportVersions = useMemo(() => {
     return reportVersions.filter((v) => {
@@ -557,9 +600,9 @@ export function ReportPack({
                   >
                     ← Back to Register
                   </button>
-                  <div className="flex items-center gap-1 text-[11px] font-mono text-neutral-500 bg-white px-2 py-1 rounded border border-neutral-200" title="Cryptographic SHA-256 Hash of snapshot payload">
-                    <Shield size={13} className="text-emerald-600" />
-                    <span>Hash Verified</span>
+                  <div className={`flex items-center gap-1 text-[11px] font-mono bg-white px-2 py-1 rounded border ${hashVerification === 'verified' ? 'text-emerald-700 border-emerald-200' : hashVerification === 'mismatch' ? 'text-error-700 border-error-200' : 'text-neutral-500 border-neutral-200'}`} title="Cryptographic SHA-256 Hash of snapshot payload">
+                    <Shield size={13} />
+                    <span>{hashVerification === 'verified' ? 'Hash Verified' : hashVerification === 'mismatch' ? 'Hash Mismatch — export blocked' : 'Verifying Hash…'}</span>
                   </div>
                 </div>
               </div>
@@ -570,7 +613,11 @@ export function ReportPack({
               <p className="text-xs font-semibold uppercase tracking-wider text-primary-700">Report Pack</p>
               <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
                 <div>
-                  <h1 className="text-2xl font-bold text-neutral-900">{displayPackType}</h1>
+                  <div className="flex items-center gap-3">
+                    {displayTemplate?.logo_data_url && <img src={displayTemplate.logo_data_url} alt="Report logo" className="max-h-14 max-w-28 object-contain" />}
+                    <h1 className="text-2xl font-bold text-neutral-900">{displayTemplate?.title || displayPackType}</h1>
+                  </div>
+                  {displayTemplate?.subtitle && <p className="mt-1 text-sm font-medium text-neutral-600">{displayTemplate.subtitle}</p>}
                   <p className="mt-1 max-w-2xl text-sm text-neutral-500">
                     {packDescriptions[displayPackType]} {activeTab === 'versions' ? 'Values are frozen from the saved report version snapshot.' : 'Values are generated locally from linked commercial, schedule, progress, cost and cash records.'}
                   </p>
@@ -591,14 +638,23 @@ export function ReportPack({
                           </option>
                         ))}
                       </select>
+                      <select value={templateId} onChange={(event) => setTemplateId(event.target.value)} className="rounded-lg border border-neutral-300 px-3 py-2 text-sm font-medium" title="Versioned report template">
+                        <option value="">Default report layout</option>
+                        {reportTemplates.filter((template) => template.report_type === 'Cost Report').map((template) => (
+                          <option key={template.id} value={template.id}>{template.template_name}</option>
+                        ))}
+                      </select>
                     </>
                   )}
                   <div className="flex items-center gap-1.5 rounded-lg border border-neutral-300 bg-white px-2.5 py-2 text-sm" title="Reporting Cut-off Date">
                     <CalendarDays size={15} className="text-neutral-400" />
                     <span className="text-xs font-medium text-neutral-600">As of {displayReportDate}</span>
                   </div>
-                  <button onClick={() => window.print()} className="flex items-center gap-2 rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-white hover:bg-primary-700 shadow-sm">
+                  <button disabled={Boolean(selectedVersion) && hashVerification !== 'verified'} onClick={() => window.print()} className="flex items-center gap-2 rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-white hover:bg-primary-700 shadow-sm disabled:cursor-not-allowed disabled:opacity-50">
                     <Printer size={16} /> Print / PDF
+                  </button>
+                  <button disabled={Boolean(selectedVersion) && hashVerification !== 'verified'} onClick={() => void exportDisplayedSnapshotExcel().catch((error) => alert(error?.message || 'Snapshot export failed.'))} className="flex items-center gap-2 rounded-lg border border-primary-300 bg-white px-4 py-2 text-sm font-semibold text-primary-700 hover:bg-primary-50 shadow-sm disabled:cursor-not-allowed disabled:opacity-50">
+                    <Download size={16} /> Export Snapshot Excel
                   </button>
                 </div>
               </div>
@@ -631,7 +687,7 @@ export function ReportPack({
             {activeSubTab === 'summary' && (
               <div className="space-y-5">
                 <section className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-                  {cards.map(([label, value, isCount]) => (
+                  {visibleCards.map(([label, value, isCount]) => (
                     <div key={label} className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
                       <p className="text-xs text-neutral-500">{label}</p>
                       <p className="mt-1 text-lg font-bold text-neutral-900">{isCount ? value : value}</p>
@@ -780,6 +836,22 @@ export function ReportPack({
                   </div>
                 </div>
               </div>
+            )}
+
+            {displayTemplate && (
+              <footer className="rounded-xl border-t border-neutral-300 bg-white p-4 text-xs text-neutral-600">
+                {displayTemplate.show_signatures && (
+                  <div className="mb-10 grid grid-cols-3 gap-8 pt-8 text-center">
+                    <span className="border-t border-neutral-400 pt-2">Prepared by</span>
+                    <span className="border-t border-neutral-400 pt-2">Reviewed by</span>
+                    <span className="border-t border-neutral-400 pt-2">Approved by</span>
+                  </div>
+                )}
+                <div className="flex justify-between gap-4">
+                  <span>{displayTemplate.footer_text}</span>
+                  {displayTemplate.show_generated_at && <span>Snapshot Data Date: {displayReportDate}</span>}
+                </div>
+              </footer>
             )}
           </div>
         )}

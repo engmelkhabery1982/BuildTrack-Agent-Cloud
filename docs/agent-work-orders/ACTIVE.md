@@ -1,22 +1,20 @@
 # أمر العمل النشط
 
-## C4 — Governed Primavera Reconciliation
+## F1 — Labor Timesheet Approval & Actual-Cost Posting
 
-المرجع التنفيذي الكامل:
+الحالة: **NEXT — لم يبدأ التنفيذ**.
 
-`docs/agent-work-orders/MASTER_CLOUD_DEVELOPMENT_WORK_ORDER_AR.md` — قسم C4
+تم إغلاق ومراجعة السلسلة السابقة `C4 → D1 → D2 → D3 → D4 → E1 → E2 → E3`
+محليًا بعد إصلاحات Codex واختبارات القبول. المرجع المثبت:
 
-الحالة: **IN PROGRESS — CODEX-REPAIRED FOUNDATION؛ يجب استكمال C4 قبل D1**.
-
-الموجود: نطاق مشروع/عقد حقيقي، preview للفروق، duplicate policies، رفض الملفات
-الفارغة، وحفظ ذري للأنشطة/التحديثات عبر SQLite مع reload بعد النجاح.
-
-الناقص الملزم: auxiliary WBS/Calendars/Resources/Assignments داخل batch، حل العلاقات
-إلى IDs، rollback/reload acceptance، XER round-trip، وdesktop acceptance واقعي. بعد
-نجاح بوابة C4 ينتقل الوكيل تلقائيًا إلى D1 وفق Feature Catalog دون انتظار رسالة.
-
-أمر التنفيذ والاستمرار الملزم لكل وكيل سحابي:
-
-- `docs/agent-work-orders/MASTER_CLOUD_DEVELOPMENT_WORK_ORDER_AR.md`
+- `docs/agent-results/CODEX_D1_E3_INTEGRATION_RESULT.md`
 - `docs/agent-work-orders/CLOUD_PROGRESS_LEDGER.md`
+
+لا يبدأ أي وكيل F1 من الذاكرة أو من تقريره السابق. يجب أولًا قراءة مواصفة F1 في:
+
+- `docs/FEATURE_CATALOG_37_AND_CONTINUATION_AR.md`
+- `docs/agent-work-orders/MASTER_CLOUD_DEVELOPMENT_WORK_ORDER_AR.md`
 - `docs/agent-work-orders/UNIVERSAL_CLOUD_AGENT_PROMPT_AR.md`
+
+الحالة `NEXT` لا تعني السماح بتجاوز بوابة مراجعة Codex أو تعديل المصدر الرسمي
+مباشرة. كل تسليم سحابي يظل مسودة حتى المراجعة والاختبار والدمج المحلي.

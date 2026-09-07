@@ -85,6 +85,7 @@ export interface KpiReconciliationInput {
   procurementReceipts?: Record<string, any>[];
   cashFlow?: Record<string, any>[];
   controlAccounts?: Record<string, any>[];
+  costPlanVersions?: Record<string, any>[];
   contractSovLines?: Record<string, any>[];
 }
 
@@ -266,6 +267,7 @@ export function reconcileRevenuePv(input: KpiReconciliationInput): KpiReconcilia
     boqItems: input.boqItems,
     costEntries: input.costEntries,
     controlAccounts: input.controlAccounts,
+    costPlanVersions: input.costPlanVersions,
     contractSovLines: input.contractSovLines,
     procurement: input.procurement,
     procurementReceipts: input.procurementReceipts,
@@ -386,6 +388,7 @@ export function reconcileRevenueEv(input: KpiReconciliationInput): KpiReconcilia
     boqItems: input.boqItems,
     costEntries: input.costEntries,
     controlAccounts: input.controlAccounts,
+    costPlanVersions: input.costPlanVersions,
     contractSovLines: input.contractSovLines,
     procurement: input.procurement,
     procurementReceipts: input.procurementReceipts,
@@ -635,6 +638,7 @@ export function reconcileDeliveryAc(input: KpiReconciliationInput): KpiReconcili
     boqItems: input.boqItems,
     costEntries: input.costEntries,
     controlAccounts: input.controlAccounts,
+    costPlanVersions: input.costPlanVersions,
     contractSovLines: input.contractSovLines,
     procurement: input.procurement,
     procurementReceipts: input.procurementReceipts,
@@ -1011,6 +1015,7 @@ export function reconcileDeliveryCostPlan(
     boqItems: input.boqItems,
     costEntries: input.costEntries,
     controlAccounts: input.controlAccounts,
+    costPlanVersions: input.costPlanVersions,
     contractSovLines: input.contractSovLines,
     procurement: input.procurement,
     procurementReceipts: input.procurementReceipts,

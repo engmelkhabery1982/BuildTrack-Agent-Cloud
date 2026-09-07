@@ -22,7 +22,7 @@ import { buildBoqWasteLedger, buildOperationalScopeReport, calculateEarnedSchedu
 import type {
   Project, Task, Cost, CostEntry, Procurement, Safety, ProgressEntry, ProjectWithStats, ViewKey,
   Schedule, Contract, BOQHeader, BOQItem, ContractSOVLine, ControlAccount, ProcurementReceipt, CashFlowEntry, SubcontractorInvoice, ClientInvoice,
-  Variation, DocumentEntry, WIREntry, ProgressCorrection, ProjectBaseline, ReportingPeriod, GovernanceRegisterEntry, RFIEntry, SubmittalEntry, QualityEntry,
+  Variation, DocumentEntry, WIREntry, ProgressCorrection, ProjectBaseline, ReportingPeriod, GovernanceRegisterEntry, RFIEntry, SubmittalEntry, QualityEntry, CostPlanVersion,
 } from '@/types';
 
 interface DashboardProps {
@@ -40,6 +40,7 @@ interface DashboardProps {
   boqItems: BOQItem[];
   contractSovLines: ContractSOVLine[];
   controlAccounts: ControlAccount[];
+  costPlanVersions: CostPlanVersion[];
   cashFlow: CashFlowEntry[];
   subInvoices: SubcontractorInvoice[];
   clientInvoices: ClientInvoice[];
@@ -106,7 +107,7 @@ type DashboardTab = 'overview' | 'report' | 'financials' | 'schedule' | 'safety'
 
 export function Dashboard({
   projects, tasks, costs, costEntries, procurement, procurementReceipts, safety, progress, schedules, contracts,
-  boqHeaders, boqItems, contractSovLines, controlAccounts, cashFlow, subInvoices, clientInvoices, variations, documents, wirEntries, progressCorrections, baselines, reportingPeriods, governanceRegister, scheduleDistributions, rfis, submittals, quality, resourceMasters, scheduleResourceAssignments, workCalendars, onNavigate, onDataReload,
+  boqHeaders, boqItems, contractSovLines, controlAccounts, costPlanVersions, cashFlow, subInvoices, clientInvoices, variations, documents, wirEntries, progressCorrections, baselines, reportingPeriods, governanceRegister, scheduleDistributions, rfis, submittals, quality, resourceMasters, scheduleResourceAssignments, workCalendars, onNavigate, onDataReload,
 }: DashboardProps) {
   const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
   const [searchQuery, setSearchQuery] = useState('');
@@ -143,8 +144,9 @@ export function Dashboard({
     procurementReceipts: procurementReceipts as Record<string, any>[],
     cashFlow: cashFlow as Record<string, any>[],
     controlAccounts: controlAccounts as Record<string, any>[],
+    costPlanVersions: costPlanVersions as Record<string, any>[],
     contractSovLines: contractSovLines as Record<string, any>[],
-  }), [selectedProjectId, reportDate, projects, contracts, variations, schedules, scheduleDistributions, baselines, wirEntries, progressCorrections, boqItems, costEntries, procurement, procurementReceipts, cashFlow, controlAccounts, contractSovLines]);
+  }), [selectedProjectId, reportDate, projects, contracts, variations, schedules, scheduleDistributions, baselines, wirEntries, progressCorrections, boqItems, costEntries, procurement, procurementReceipts, cashFlow, controlAccounts, costPlanVersions, contractSovLines]);
   const reconciledKpis = useMemo(() => ({
     modifiedContractValue: getKpiReconciliation('modified_contract_value', reconciliationInput),
     revenuePv: getKpiReconciliation('revenue_pv', reconciliationInput),
@@ -1944,13 +1946,21 @@ export function Dashboard({
                 </button>
               </div>
               <form
-                onSubmit={(e) => {
+                onSubmit={async (e) => {
                   e.preventDefault();
                   if (!selectedWarningForAction) return;
-                  handleCreateAction(selectedWarningForAction, actionAssignedTo, actionDueDate);
-                  setActionAssignedTo('');
-                  setActionDueDate('');
-                  setSelectedWarningForAction(null);
+                  if (!selectedProjectId || selectedProjectId === 'all') {
+                    window.alert('Select one project before creating a governed action.');
+                    return;
+                  }
+                  try {
+                    await handleCreateAction(selectedWarningForAction, actionAssignedTo, actionDueDate, selectedProjectId);
+                    setActionAssignedTo('');
+                    setActionDueDate('');
+                    setSelectedWarningForAction(null);
+                  } catch (error: any) {
+                    window.alert(error?.message || 'Failed to create the governed action.');
+                  }
                 }}
                 className="p-5 space-y-4"
               >

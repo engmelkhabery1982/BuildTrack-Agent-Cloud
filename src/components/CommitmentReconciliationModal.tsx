@@ -6,7 +6,7 @@ import {
   Plus, History, ChevronDown, ChevronUp, CheckCircle2, AlertOctagon, Info
 } from 'lucide-react';
 import { useData } from '@/hooks/useData';
-import { dataRepository } from '@/data';
+import { acceptProcurementReceipt, approveSupplierInvoice, dataRepository, settleSupplierInvoicePayment } from '@/data';
 import type {
   Project, Procurement, ProcurementReceipt, SupplierInvoice,
   SupplierInvoiceLine, SupplierInvoicePayment, ReportingPeriod, CostCode
@@ -299,6 +299,7 @@ export const CommitmentReconciliationModal: React.FC<CommitmentReconciliationMod
     setIsSubmitting(true);
     try {
       const receiptId = crypto.randomUUID();
+      const receiptDate = new Date().toISOString().split('T')[0];
       const newReceipt: ProcurementReceipt = {
         id: receiptId,
         project_id: projectId,
@@ -316,30 +317,18 @@ export const CommitmentReconciliationModal: React.FC<CommitmentReconciliationMod
         accepted_quantity: accQty,
         unit_cost: activePO.unit_cost,
         accepted_amount: accQty * activePO.unit_cost,
-        receipt_date: new Date().toISOString().split('T')[0],
-        status: 'Accepted',
+        receipt_date: receiptDate,
+        status: 'Received',
         notes: receiptNotes,
         created_at: new Date().toISOString()
       };
 
       await dataRepository.insert<ProcurementReceipt>('procurement_receipts', newReceipt);
-
-      // Create a matching audit trail entry or cost entry directly
-      await dataRepository.insert('cost_entries', {
-        id: crypto.randomUUID(),
-        project_id: projectId,
-        contract_id: activePO.contract_id,
-        control_account_id: activePO.control_account_id || null,
-        boq_item_id: activePO.boq_item_id,
-        cost_code_id: activePO.cost_code_id || null,
-        item_description: `Accrued Cost from GRN: ${receiptNumber} (${activePO.item})`,
-        cost_type: 'Material',
-        quantity: accQty,
-        unit_cost: activePO.unit_cost,
-        total_cost: accQty * activePO.unit_cost,
-        date: new Date().toISOString().split('T')[0],
-        status: 'Approved',
-        created_at: new Date().toISOString()
+      await acceptProcurementReceipt({
+        operationId: `accept-grn:${receiptId}`,
+        receiptId,
+        actor: 'PMO Administrator',
+        acceptedAt: receiptDate,
       });
 
       setShowAddReceipt(false);
@@ -368,6 +357,7 @@ export const CommitmentReconciliationModal: React.FC<CommitmentReconciliationMod
     setIsSubmitting(true);
     try {
       const invoiceId = crypto.randomUUID();
+      const invoiceDate = new Date().toISOString().split('T')[0];
       const goodsAmount = unInvoicedReceipts.reduce((sum, r) => sum + r.accepted_amount, 0);
       const taxAmount = (goodsAmount * taxRate) / 100;
       const deductionsAmount = (goodsAmount * retentionRate) / 100 + advanceOffset;
@@ -381,16 +371,17 @@ export const CommitmentReconciliationModal: React.FC<CommitmentReconciliationMod
         supplier: activePO.supplier,
         invoice_number: invoiceNumber,
         invoice_number_locked: true,
-        invoice_date: new Date().toISOString().split('T')[0],
+        invoice_date: invoiceDate,
         due_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 30 days due
         currency: 'USD',
         goods_amount: goodsAmount,
-        tax_amount: taxAmount,
+        // Tax is carried by matched lines; keeping it here too would double count it.
+        tax_amount: 0,
         deductions_amount: deductionsAmount,
         net_payable_amount: netPayableAmount,
-        status: 'Approved', // Auto matched and approved
-        approved_by: 'PMO Administrator',
-        approved_date: new Date().toISOString().split('T')[0],
+        status: 'Matched',
+        approved_by: '',
+        approved_date: null,
         variance_reason: 'Accrual reconciled matching',
         notes: invoiceNotes,
         created_at: new Date().toISOString()
@@ -422,6 +413,12 @@ export const CommitmentReconciliationModal: React.FC<CommitmentReconciliationMod
         };
         await dataRepository.insert<SupplierInvoiceLine>('supplier_invoice_lines', line);
       }
+      await approveSupplierInvoice({
+        operationId: `approve-ap:${invoiceId}`,
+        invoiceId,
+        actor: 'PMO Administrator',
+        approvedAt: invoiceDate,
+      });
 
       setShowAddInvoice(false);
       if (onSaved) onSaved();
@@ -446,6 +443,7 @@ export const CommitmentReconciliationModal: React.FC<CommitmentReconciliationMod
       // Pick first invoice or distribute amount across multiple. For simplicity, match first approved invoice.
       const targetInvoice = outstandingInvoices[0];
       const paymentId = crypto.randomUUID();
+      const paymentDate = new Date().toISOString().split('T')[0];
 
       const newPayment: SupplierInvoicePayment = {
         id: paymentId,
@@ -454,24 +452,20 @@ export const CommitmentReconciliationModal: React.FC<CommitmentReconciliationMod
         contract_id: activePO?.contract_id || null,
         payment_number: paymentNumber,
         payment_number_locked: true,
-        payment_date: new Date().toISOString().split('T')[0],
+        payment_date: paymentDate,
         amount: paymentAmount,
-        status: 'Settled',
+        status: 'Draft',
         payment_reference: paymentRef,
         notes: paymentNotes,
         created_at: new Date().toISOString()
       };
 
       await dataRepository.insert<SupplierInvoicePayment>('supplier_invoice_payments', newPayment);
-
-      // Update invoice status to 'Paid' or 'Partially Paid'
-      const totalPaidOnInvoice = (data.supplierInvoicePayments as SupplierInvoicePayment[] || [])
-        .filter(p => p.supplier_invoice_id === targetInvoice.id && p.status === 'Settled')
-        .reduce((sum, p) => sum + p.amount, 0) + paymentAmount;
-      
-      const isFullyPaid = totalPaidOnInvoice >= targetInvoice.net_payable_amount;
-      await dataRepository.update<SupplierInvoice>('supplier_invoices', targetInvoice.id, {
-        status: isFullyPaid ? 'Paid' : 'Partially Paid'
+      await settleSupplierInvoicePayment({
+        operationId: `settle-ap:${paymentId}`,
+        paymentId,
+        actor: 'PMO Administrator',
+        settledAt: paymentDate,
       });
 
       setShowAddPayment(false);

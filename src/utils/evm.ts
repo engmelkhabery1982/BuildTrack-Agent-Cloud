@@ -104,6 +104,8 @@ export function calculateEvmAtDataDate(input: {
   costEntries: Record<string, any>[];
   /** Optional Control Account and Cost Plan facts for delivery cost separation */
   controlAccounts?: Record<string, any>[];
+  /** Approved D1 time-phased Delivery Cost plans, scoped by Control Account. */
+  costPlanVersions?: Record<string, any>[];
   contractSovLines?: Record<string, any>[];
   procurement?: Record<string, any>[];
   procurementReceipts?: Record<string, any>[];
@@ -207,6 +209,11 @@ export function calculateEvmAtDataDate(input: {
   const scopedControlAccounts = (input.controlAccounts || []).filter((account) => contractIds.has(String(account.contract_id || ''))
     && !['Inactive', 'Closed'].includes(String(account.status || '')));
   const sovById = new Map((input.contractSovLines || []).map((line) => [String(line.id), line]));
+  const approvedCostPlanByAccount = new Map(
+    (input.costPlanVersions || [])
+      .filter((plan) => plan.status === 'Approved')
+      .map((plan) => [String(plan.control_account_id || ''), plan]),
+  );
   const mainBoqId = (item: Record<string, any> | undefined) => String(item?.main_boq_item_id || item?.id || '');
   const mainBoqForWir = (wir: Record<string, any>) => {
     const item = boqById.get(String(wir.boq_item_id || ''));
@@ -236,8 +243,11 @@ export function calculateEvmAtDataDate(input: {
   };
   const accountPlans = scopedControlAccounts.map((account) => {
     const sov = sovById.get(String(account.contract_sov_line_id || ''));
-    if (!sov || !['Active', 'Closed'].includes(String(sov.status || ''))) return null;
-    const budget = Number(sov.revised_budget ?? sov.original_budget);
+    const approvedCostPlan = approvedCostPlanByAccount.get(String(account.id || ''));
+    if (!approvedCostPlan && (!sov || !['Active', 'Closed'].includes(String(sov.status || '')))) return null;
+    const budget = approvedCostPlan
+      ? Number(approvedCostPlan.delivery_cost_bac)
+      : Number(sov?.revised_budget ?? sov?.original_budget);
     if (!Number.isFinite(budget) || budget <= 0) return null;
     const accountId = String(account.id || '');
     const boqItemId = String(account.boq_item_id || sov?.boq_item_id || '');
@@ -263,7 +273,12 @@ export function calculateEvmAtDataDate(input: {
     const progressBasis = boqRevenueBac || plannedRevenueBac;
     const plannedFraction = plannedRevenueBac > 0 ? Math.max(0, Math.min(1, plannedRevenueToDate / plannedRevenueBac)) : 0;
     const earnedFraction = progressBasis > 0 ? Math.max(0, Math.min(1, earnedRevenue / progressBasis)) : 0;
-    return { budget, pv: budget * plannedFraction, ev: budget * earnedFraction };
+    const governedCostPv = approvedCostPlan
+      ? (approvedCostPlan.periods || [])
+          .filter((period: Record<string, any>) => datedThrough(period.period_end, dataDate))
+          .reduce((sum: number, period: Record<string, any>) => sum + (Number(period.planned_cost) || 0), 0)
+      : budget * plannedFraction;
+    return { budget, pv: Math.min(budget, Math.max(0, governedCostPv)), ev: budget * earnedFraction };
   }).filter((row): row is { budget: number; pv: number; ev: number } => Boolean(row));
 
   const selectedCostPlans = accountPlans;

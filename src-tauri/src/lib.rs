@@ -5,6 +5,9 @@ use tauri::Manager;
 mod import_batch;
 mod supplier_ap;
 mod commercial_workflow;
+mod report_versioning;
+mod cost_plan_versioning;
+mod estimate_versioning;
 
 #[tauri::command]
 async fn commit_governed_import(
@@ -93,6 +96,30 @@ async fn reverse_commercial_posting(app: tauri::AppHandle, request: commercial_w
 async fn reverse_variation(app: tauri::AppHandle, request: commercial_workflow::ReversalRequest) -> Result<commercial_workflow::Result, String> {
     let path = app.path().app_config_dir().map_err(|error| error.to_string())?.join("buildtrack.db");
     commercial_workflow::reverse_variation(&path, request).await
+}
+
+#[tauri::command]
+async fn issue_report_version(
+    app: tauri::AppHandle,
+    request: report_versioning::IssueReportVersionRequest,
+) -> Result<report_versioning::IssueReportVersionResult, String> {
+    let path = app.path().app_config_dir().map_err(|error| error.to_string())?.join("buildtrack.db");
+    report_versioning::issue_report_version(&path, request).await
+}
+
+#[tauri::command]
+async fn approve_cost_plan_version(
+    app: tauri::AppHandle,
+    request: cost_plan_versioning::ApproveCostPlanRequest,
+) -> Result<cost_plan_versioning::ApproveCostPlanResult, String> {
+    let path = app.path().app_config_dir().map_err(|error| error.to_string())?.join("buildtrack.db");
+    cost_plan_versioning::approve_cost_plan(&path, request).await
+}
+
+#[tauri::command]
+async fn approve_estimate_version(app: tauri::AppHandle, request: estimate_versioning::ApproveEstimateRequest) -> Result<estimate_versioning::ApproveEstimateResult, String> {
+    let path = app.path().app_config_dir().map_err(|error| error.to_string())?.join("buildtrack.db");
+    estimate_versioning::approve_estimate(&path, request).await
 }
 
 #[tauri::command]
@@ -2435,6 +2462,152 @@ pub fn run() {
     "#,
             kind: tauri_plugin_sql::MigrationKind::Up,
         },
+        tauri_plugin_sql::Migration {
+            version: 58,
+            description: "govern_controlled_report_versions",
+            sql: r#"
+      ALTER TABLE report_versions ADD COLUMN data_date TEXT;
+      ALTER TABLE report_versions ADD COLUMN pack_type TEXT;
+      ALTER TABLE report_versions ADD COLUMN template_id TEXT;
+      ALTER TABLE report_versions ADD COLUMN version_code TEXT;
+      ALTER TABLE report_versions ADD COLUMN status TEXT;
+      ALTER TABLE report_versions ADD COLUMN snapshot_hash TEXT;
+      ALTER TABLE report_versions ADD COLUMN snapshot_payload TEXT;
+      ALTER TABLE report_versions ADD COLUMN issuer TEXT;
+      ALTER TABLE report_versions ADD COLUMN sign_off_note TEXT;
+      ALTER TABLE report_versions ADD COLUMN issued_at TEXT;
+      ALTER TABLE report_versions ADD COLUMN superseded_by TEXT;
+
+      UPDATE report_versions SET
+        data_date = json_extract(payload, '$.data_date'),
+        pack_type = json_extract(payload, '$.pack_type'),
+        template_id = json_extract(payload, '$.template_id'),
+        version_code = json_extract(payload, '$.version_code'),
+        status = json_extract(payload, '$.status'),
+        snapshot_hash = json_extract(payload, '$.snapshot_hash'),
+        snapshot_payload = json_extract(payload, '$.snapshot_payload'),
+        issuer = json_extract(payload, '$.issuer'),
+        sign_off_note = json_extract(payload, '$.sign_off_note'),
+        issued_at = json_extract(payload, '$.issued_at'),
+        superseded_by = json_extract(payload, '$.superseded_by');
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_report_version_code_scope
+        ON report_versions(COALESCE(project_id, ''), lower(version_code));
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_report_single_issued_pack
+        ON report_versions(COALESCE(project_id, ''), pack_type) WHERE status = 'Issued';
+      CREATE INDEX IF NOT EXISTS idx_report_version_register
+        ON report_versions(project_id, data_date, pack_type, status);
+
+      CREATE TRIGGER IF NOT EXISTS report_version_issued_immutable
+      BEFORE UPDATE ON report_versions
+      WHEN OLD.status = 'Issued' AND NOT (
+        NEW.status = 'Superseded'
+        AND NEW.id IS OLD.id AND NEW.project_id IS OLD.project_id AND NEW.contract_id IS OLD.contract_id
+        AND NEW.data_date IS OLD.data_date AND NEW.pack_type IS OLD.pack_type
+        AND NEW.template_id IS OLD.template_id AND NEW.version_code IS OLD.version_code
+        AND NEW.snapshot_hash IS OLD.snapshot_hash AND NEW.snapshot_payload IS OLD.snapshot_payload
+        AND NEW.issuer IS OLD.issuer AND NEW.sign_off_note IS OLD.sign_off_note
+        AND NEW.issued_at IS OLD.issued_at
+      )
+      BEGIN SELECT RAISE(ABORT, 'Issued reports are immutable and may only transition to Superseded.'); END;
+      CREATE TRIGGER IF NOT EXISTS report_version_locked_delete
+      BEFORE DELETE ON report_versions WHEN OLD.status IN ('Issued', 'Superseded')
+      BEGIN SELECT RAISE(ABORT, 'Issued or Superseded reports cannot be deleted.'); END;
+    "#,
+            kind: tauri_plugin_sql::MigrationKind::Up,
+        },
+        tauri_plugin_sql::Migration {
+            version: 59,
+            description: "govern_variance_action_lifecycle",
+            sql: r#"
+      CREATE TRIGGER IF NOT EXISTS variance_action_close_requires_evidence
+      BEFORE UPDATE ON variance_actions
+      WHEN json_extract(NEW.payload, '$.status') = 'Closed'
+        AND trim(COALESCE(json_extract(NEW.payload, '$.evidence'), '')) = ''
+      BEGIN SELECT RAISE(ABORT, 'Evidence is required to close a variance action.'); END;
+      CREATE TRIGGER IF NOT EXISTS variance_action_closed_immutable
+      BEFORE UPDATE ON variance_actions
+      WHEN json_extract(OLD.payload, '$.status') = 'Closed'
+      BEGIN SELECT RAISE(ABORT, 'Closed variance actions are immutable.'); END;
+      CREATE TRIGGER IF NOT EXISTS variance_action_closed_delete
+      BEFORE DELETE ON variance_actions
+      WHEN json_extract(OLD.payload, '$.status') = 'Closed'
+      BEGIN SELECT RAISE(ABORT, 'Closed variance actions cannot be deleted.'); END;
+    "#,
+            kind: tauri_plugin_sql::MigrationKind::Up,
+        },
+        tauri_plugin_sql::Migration {
+            version: 60,
+            description: "govern_variance_action_scope_and_transitions",
+            sql: r#"
+      CREATE TRIGGER IF NOT EXISTS variance_action_scope_insert
+      BEFORE INSERT ON variance_actions
+      WHEN NEW.project_id IS NULL OR trim(NEW.project_id) = ''
+        OR (NEW.contract_id IS NOT NULL AND NOT EXISTS (
+          SELECT 1 FROM contracts WHERE id = NEW.contract_id AND project_id = NEW.project_id
+        ))
+      BEGIN SELECT RAISE(ABORT, 'Variance action project/contract scope is invalid.'); END;
+      CREATE TRIGGER IF NOT EXISTS variance_action_scope_update
+      BEFORE UPDATE ON variance_actions
+      WHEN NEW.project_id IS NULL OR trim(NEW.project_id) = ''
+        OR (NEW.contract_id IS NOT NULL AND NOT EXISTS (
+          SELECT 1 FROM contracts WHERE id = NEW.contract_id AND project_id = NEW.project_id
+        ))
+      BEGIN SELECT RAISE(ABORT, 'Variance action project/contract scope is invalid.'); END;
+      CREATE TRIGGER IF NOT EXISTS variance_action_transition_guard
+      BEFORE UPDATE ON variance_actions
+      WHEN json_extract(OLD.payload, '$.status') <> json_extract(NEW.payload, '$.status')
+        AND NOT (
+          (json_extract(OLD.payload, '$.status') = 'Open' AND json_extract(NEW.payload, '$.status') = 'Assigned')
+          OR (json_extract(OLD.payload, '$.status') = 'Assigned' AND json_extract(NEW.payload, '$.status') = 'In Progress')
+          OR (json_extract(OLD.payload, '$.status') = 'In Progress' AND json_extract(NEW.payload, '$.status') = 'Resolved')
+          OR (json_extract(OLD.payload, '$.status') = 'Resolved' AND json_extract(NEW.payload, '$.status') IN ('In Progress', 'Closed'))
+        )
+      BEGIN SELECT RAISE(ABORT, 'Invalid variance action lifecycle transition.'); END;
+      CREATE TRIGGER IF NOT EXISTS variance_action_resolution_required
+      BEFORE UPDATE ON variance_actions
+      WHEN json_extract(NEW.payload, '$.status') IN ('Resolved', 'Closed')
+        AND trim(COALESCE(json_extract(NEW.payload, '$.resolution'), '')) = ''
+      BEGIN SELECT RAISE(ABORT, 'A documented resolution is required before resolving or closing an action.'); END;
+    "#,
+            kind: tauri_plugin_sql::MigrationKind::Up,
+        },
+        tauri_plugin_sql::Migration {
+            version: 60,
+            description: "govern_variance_action_scope_and_transitions",
+            sql: r#"
+      CREATE TRIGGER IF NOT EXISTS variance_action_scope_insert
+      BEFORE INSERT ON variance_actions
+      WHEN NEW.project_id IS NULL OR trim(NEW.project_id) = ''
+        OR (NEW.contract_id IS NOT NULL AND NOT EXISTS (
+          SELECT 1 FROM contracts WHERE id = NEW.contract_id AND project_id = NEW.project_id
+        ))
+      BEGIN SELECT RAISE(ABORT, 'Variance action project/contract scope is invalid.'); END;
+      CREATE TRIGGER IF NOT EXISTS variance_action_scope_update
+      BEFORE UPDATE ON variance_actions
+      WHEN NEW.project_id IS NULL OR trim(NEW.project_id) = ''
+        OR (NEW.contract_id IS NOT NULL AND NOT EXISTS (
+          SELECT 1 FROM contracts WHERE id = NEW.contract_id AND project_id = NEW.project_id
+        ))
+      BEGIN SELECT RAISE(ABORT, 'Variance action project/contract scope is invalid.'); END;
+      CREATE TRIGGER IF NOT EXISTS variance_action_transition_guard
+      BEFORE UPDATE ON variance_actions
+      WHEN json_extract(OLD.payload, '$.status') <> json_extract(NEW.payload, '$.status')
+        AND NOT (
+          (json_extract(OLD.payload, '$.status') = 'Open' AND json_extract(NEW.payload, '$.status') = 'Assigned')
+          OR (json_extract(OLD.payload, '$.status') = 'Assigned' AND json_extract(NEW.payload, '$.status') = 'In Progress')
+          OR (json_extract(OLD.payload, '$.status') = 'In Progress' AND json_extract(NEW.payload, '$.status') = 'Resolved')
+          OR (json_extract(OLD.payload, '$.status') = 'Resolved' AND json_extract(NEW.payload, '$.status') IN ('In Progress', 'Closed'))
+        )
+      BEGIN SELECT RAISE(ABORT, 'Invalid variance action lifecycle transition.'); END;
+      CREATE TRIGGER IF NOT EXISTS variance_action_resolution_required
+      BEFORE UPDATE ON variance_actions
+      WHEN json_extract(NEW.payload, '$.status') IN ('Resolved', 'Closed')
+        AND trim(COALESCE(json_extract(NEW.payload, '$.resolution'), '')) = ''
+      BEGIN SELECT RAISE(ABORT, 'A documented resolution is required before resolving or closing an action.'); END;
+    "#,
+            kind: tauri_plugin_sql::MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()
@@ -2465,6 +2638,9 @@ pub fn run() {
             settle_payment_certificate,
             reverse_commercial_posting,
             reverse_variation,
+            issue_report_version,
+            approve_cost_plan_version,
+            approve_estimate_version,
             save_excel_download,
             save_document_attachment,
             backup_local_database,

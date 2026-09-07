@@ -86,6 +86,7 @@ export const CostPlanModal: React.FC<CostPlanModalProps> = ({
   const [dataDate, setDataDate] = useState(governedDataDate || new Date().toISOString().slice(0, 10));
   const [deliveryCostBac, setDeliveryCostBac] = useState<number>(0);
   const [curveType, setCurveType] = useState<CurveDistributionType>('Linear');
+  const [frequency, setFrequency] = useState<'monthly' | 'weekly' | 'quarterly'>('monthly');
   const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10));
   const [endDate, setEndDate] = useState(
     new Date(Date.now() + 180 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
@@ -161,7 +162,15 @@ export const CostPlanModal: React.FC<CostPlanModalProps> = ({
     dDate: string = dataDate,
   ) => {
     if (bac <= 0 || !start || !end || new Date(start) >= new Date(end)) return;
-    const generated = generateCostPlanPeriods(bac, start, end, cType, dDate);
+    const generated = generateCostPlanPeriods({
+      deliveryCostBac: bac,
+      startDate: start,
+      endDate: end,
+      curveType: cType,
+      frequency,
+      dataDate: dDate,
+      versionId: editingVersionId || 'draft-version',
+    });
     setPeriods(generated);
   };
 
@@ -175,6 +184,7 @@ export const CostPlanModal: React.FC<CostPlanModalProps> = ({
     const budget = activeControlAccount ? (Number(activeControlAccount.budget_amount) || 100000) : 100000;
     setDeliveryCostBac(budget);
     setCurveType('Linear');
+    setFrequency('monthly');
     handleRecalculatePeriods('Linear', budget, startDate, endDate, dataDate);
     setFormError(null);
     setActiveTab('editor');
@@ -193,6 +203,7 @@ export const CostPlanModal: React.FC<CostPlanModalProps> = ({
     setDataDate(version.data_date);
     setDeliveryCostBac(version.delivery_cost_bac);
     setCurveType(version.curve_type);
+    setFrequency(version.frequency || 'monthly');
     setStartDate(version.start_date);
     setEndDate(version.end_date);
     setOwner(version.owner || 'Cost Controller');
@@ -287,6 +298,7 @@ export const CostPlanModal: React.FC<CostPlanModalProps> = ({
       data_date: dataDate,
       delivery_cost_bac: deliveryCostBac,
       curve_type: curveType,
+      frequency,
       start_date: startDate,
       end_date: endDate,
       periods_count: periods.length,
@@ -727,10 +739,38 @@ export const CostPlanModal: React.FC<CostPlanModalProps> = ({
                     >
                       <option value="Linear">Linear (Equal Spread)</option>
                       <option value="Bell">Bell Curve (Standard Normal)</option>
-                      <option value="SCurve">S-Curve (Sigmoid Logistic)</option>
-                      <option value="FrontLoaded">Front-Loaded (Early Investment)</option>
-                      <option value="BackLoaded">Back-Loaded (Heavy Commissioning)</option>
+                      <option value="S-Curve">S-Curve (Sigmoid Logistic)</option>
+                      <option value="Front-loaded">Front-Loaded (Early Investment)</option>
+                      <option value="Back-loaded">Back-Loaded (Heavy Commissioning)</option>
                       <option value="Manual">Manual (Custom Phasing)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block font-medium text-slate-700 mb-1">Planning Period</label>
+                    <select
+                      id="cost-plan-frequency-select"
+                      disabled={status === 'Approved' || status === 'Superseded'}
+                      value={frequency}
+                      onChange={(e) => {
+                        const next = e.target.value as 'monthly' | 'weekly' | 'quarterly';
+                        setFrequency(next);
+                        const generated = generateCostPlanPeriods({
+                          deliveryCostBac,
+                          startDate,
+                          endDate,
+                          curveType,
+                          frequency: next,
+                          dataDate,
+                          versionId: editingVersionId || 'draft-version',
+                        });
+                        setPeriods(generated);
+                      }}
+                      className="w-full p-2 border border-slate-200 rounded-md bg-white text-slate-800 disabled:bg-slate-100"
+                    >
+                      <option value="monthly">Monthly calendar periods</option>
+                      <option value="weekly">Weekly periods</option>
+                      <option value="quarterly">Quarterly calendar periods</option>
                     </select>
                   </div>
 

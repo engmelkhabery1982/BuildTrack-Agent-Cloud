@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Gauge, X, Info, DollarSign, Calendar, AlertTriangle, Layers,
@@ -7,9 +7,12 @@ import {
 } from 'lucide-react';
 import type {
   Project, Cost, CostEntry, BOQItem, ControlAccount, Schedule, ReportingPeriod,
-  Variation, QualityEntry, RFIEntry, SubmittalEntry, CashFlowEntry, VarianceActionItem
+  Variation, QualityEntry, RFIEntry, SubmittalEntry, CashFlowEntry, VarianceActionItem,
+  Contract, WIREntry, ProgressCorrection, CostPlanVersion
 } from '@/types';
 import type { Warning } from '@/utils/varianceActionRegister';
+import { calculateEvmAtDataDate } from '@/utils/evm';
+import { useProjectDataDate } from '@/context/ProjectDataDateContext';
 
 interface IntegratedProjectControlsCockpitProps {
   projects: Project[];
@@ -18,6 +21,15 @@ interface IntegratedProjectControlsCockpitProps {
   boqItems: BOQItem[];
   controlAccounts: ControlAccount[];
   schedules: Schedule[];
+  contracts: Contract[];
+  scheduleDistributions: Record<string, any>[];
+  baselines: Record<string, any>[];
+  wirEntries: WIREntry[];
+  progressCorrections: ProgressCorrection[];
+  contractSovLines: Record<string, any>[];
+  costPlanVersions: CostPlanVersion[];
+  procurement: Record<string, any>[];
+  procurementReceipts: Record<string, any>[];
   reportingPeriods: ReportingPeriod[];
   variations: Variation[];
   quality: QualityEntry[];
@@ -62,6 +74,15 @@ export function IntegratedProjectControlsCockpit({
   boqItems,
   controlAccounts,
   schedules,
+  contracts,
+  scheduleDistributions,
+  baselines,
+  wirEntries,
+  progressCorrections,
+  contractSovLines,
+  costPlanVersions,
+  procurement,
+  procurementReceipts,
   reportingPeriods,
   variations,
   quality,
@@ -72,6 +93,7 @@ export function IntegratedProjectControlsCockpit({
   onCreateAction,
   onNavigate
 }: IntegratedProjectControlsCockpitProps) {
+  const { dataDate, setDataDate, setProjectId } = useProjectDataDate();
   // Core Filter States
   const [selectedProjectId, setSelectedProjectId] = useState<string>(projects[0]?.id || '');
   const [selectedControlAccountId, setSelectedControlAccountId] = useState<string>('all');
@@ -92,7 +114,7 @@ export function IntegratedProjectControlsCockpit({
     return reportingPeriods.filter(p => p.project_id === selectedProjectId);
   }, [reportingPeriods, selectedProjectId]);
 
-  const [selectedPeriodId, setSelectedPeriodId] = useState<string>(projectPeriods[0]?.id || 'latest');
+  const [selectedPeriodId, setSelectedPeriodId] = useState<string>('latest');
 
   const selectedPeriod = useMemo(() => {
     if (selectedPeriodId === 'latest') {
@@ -100,6 +122,15 @@ export function IntegratedProjectControlsCockpit({
     }
     return projectPeriods.find(p => p.id === selectedPeriodId);
   }, [projectPeriods, selectedPeriodId]);
+
+  useEffect(() => {
+    setProjectId(selectedProjectId || 'all');
+  }, [selectedProjectId, setProjectId]);
+
+  useEffect(() => {
+    const periodDataDate = selectedPeriod?.data_date;
+    if (periodDataDate) setDataDate(String(periodDataDate).slice(0, 10));
+  }, [selectedPeriod, setDataDate]);
 
   // Project-specific filtered items
   const filteredControlAccounts = useMemo(() => {
@@ -127,8 +158,49 @@ export function IntegratedProjectControlsCockpit({
   }, [quality, selectedProjectId]);
 
   const projectCashFlow = useMemo(() => {
-    return cashFlow.filter(cf => cf.project_id === selectedProjectId);
-  }, [cashFlow, selectedProjectId]);
+    return cashFlow.filter(cf => cf.project_id === selectedProjectId && (!cf.date || String(cf.date).slice(0, 10) <= dataDate));
+  }, [cashFlow, selectedProjectId, dataDate]);
+
+  const mainContract = useMemo(() => contracts.find(contract =>
+    contract.project_id === selectedProjectId && !contract.parent_main_contract_id
+  ), [contracts, selectedProjectId]);
+
+  const performanceContractIds = useMemo(() => mainContract
+    ? contracts.filter(contract => contract.id === mainContract.id || contract.parent_main_contract_id === mainContract.id).map(contract => contract.id)
+    : [], [contracts, mainContract]);
+
+  const selectedControlAccounts = useMemo(() => filteredControlAccounts.filter(account =>
+    selectedControlAccountId === 'all' || account.id === selectedControlAccountId
+  ), [filteredControlAccounts, selectedControlAccountId]);
+
+  const approvedWirs = useMemo(() => wirEntries.filter(wir =>
+    wir.project_id === selectedProjectId
+    && performanceContractIds.includes(String(wir.contract_id || ''))
+    && Boolean(wir.inspection_date)
+    && String(wir.inspection_date).slice(0, 10) <= dataDate
+    && (wir.status === 'Approved' || wir.result === 'Pass' || wir.result === 'Conditional Pass')
+    && (selectedControlAccountId === 'all' || wir.control_account_id === selectedControlAccountId)
+  ), [wirEntries, selectedProjectId, performanceContractIds, dataDate, selectedControlAccountId]);
+
+  const evm = useMemo(() => calculateEvmAtDataDate({
+    contractIds: mainContract ? [mainContract.id] : [],
+    performanceContractIds,
+    dataDate,
+    schedules: projectSchedules.filter(schedule => selectedControlAccountId === 'all' || schedule.control_account_id === selectedControlAccountId),
+    scheduleDistributions,
+    baselines,
+    wirEntries,
+    progressCorrections,
+    boqItems,
+    costEntries,
+    controlAccounts: selectedControlAccounts,
+    costPlanVersions,
+    contractSovLines,
+    procurement,
+    procurementReceipts,
+  }), [mainContract, performanceContractIds, dataDate, projectSchedules, selectedControlAccountId,
+    scheduleDistributions, baselines, wirEntries, progressCorrections, boqItems, costEntries,
+    selectedControlAccounts, costPlanVersions, contractSovLines, procurement, procurementReceipts]);
 
   // Handle KPI metadata descriptions
   const kpiDefinitions: Record<string, KpiMeta> = {
@@ -178,17 +250,14 @@ export function IntegratedProjectControlsCockpit({
   const cockpitMetrics = useMemo(() => {
     // 1. SCOPE
     const totalScopeItems = projectBOQItems.length;
-    const totalScopeValue = projectBOQItems.reduce((sum, item) => sum + (Number(item.amount) || 0), 0);
-    const completedScopeValue = projectBOQItems.reduce((sum, item) => {
-      const exec = Number(item.executed_quantity || item.verified_quantity || 0);
-      return sum + (exec * (Number(item.unit_rate) || 0));
-    }, 0);
+    const totalScopeValue = evm.revenueBAC;
+    const completedScopeValue = evm.revenueEV;
     const scopeProgress = totalScopeValue > 0 ? (completedScopeValue / totalScopeValue) * 100 : 0;
 
     // 2. QUANTITY
-    const totalExecutedQty = projectBOQItems.reduce((sum, item) => sum + (Number(item.executed_quantity || item.verified_quantity || 0)), 0);
-    const totalBudgetQty = projectBOQItems.reduce((sum, item) => sum + (Number(item.quantity) || 0), 0);
-    const qtyRatio = totalBudgetQty > 0 ? (totalExecutedQty / totalBudgetQty) * 100 : 0;
+    // Quantities with different units must never be aggregated into one ratio.
+    const approvedWirCount = approvedWirs.length;
+    const inspectedItemCount = new Set(approvedWirs.map(wir => wir.boq_item_id).filter(Boolean)).size;
 
     // 3. SCHEDULE
     const delayedCriticalActivities = projectSchedules.filter(s => (s.status === 'Delayed' || s.activity_status === 'Delayed') && (s.critical_path || s.is_critical_item)).length;
@@ -200,21 +269,15 @@ export function IntegratedProjectControlsCockpit({
     }, 0);
 
     // 4. COST (EVM)
-    const budgetTotal = projectCosts.reduce((sum, c) => sum + (Number(c.budget) || 0), 0);
-    const actualTotal = projectCosts.reduce((sum, c) => sum + (Number(c.actual) || 0), 0);
-    const committedTotal = projectCosts.reduce((sum, c) => sum + (Number(c.committed) || 0), 0);
-    const earnedValueTotal = projectCosts.reduce((sum, c) => {
-      const budget = Number(c.budget) || 0;
-      const progressVal = Number(c.status === 'Completed' ? 100 : c.status === 'In Progress' ? 50 : 0) / 100;
-      return sum + (budget * progressVal);
-    }, 0);
-    const cpi = actualTotal > 0 ? earnedValueTotal / actualTotal : 1;
-    const cv = earnedValueTotal - actualTotal;
+    const budgetTotal = evm.costBAC;
+    const actualTotal = evm.costAC;
+    const committedTotal = evm.cost.openCommitment;
+    const earnedValueTotal = evm.costEV;
+    const cpi = evm.costCPI;
+    const cv = evm.costCV;
 
     // 5. PROGRESS
-    const averagePhysicalProgress = totalActivities > 0 
-      ? projectSchedules.reduce((sum, s) => sum + (Number(s.progress) || 0), 0) / totalActivities
-      : 0;
+    const averagePhysicalProgress = evm.revenueBAC > 0 ? (evm.revenueEV / evm.revenueBAC) * 100 : 0;
     
     // 6. CASH
     const cashInflow = projectCashFlow.reduce((sum, cf) => sum + (Number(cf.inflow) || 0), 0);
@@ -232,15 +295,15 @@ export function IntegratedProjectControlsCockpit({
 
     return {
       scope: { totalScopeItems, totalScopeValue, scopeProgress },
-      quantity: { totalBudgetQty, totalExecutedQty, qtyRatio },
+      quantity: { approvedWirCount, inspectedItemCount },
       schedule: { delayedCriticalActivities, delayedTotalActivities, totalActivities, scheduleSlippageDays },
-      cost: { budgetTotal, actualTotal, committedTotal, earnedValueTotal, cpi, cv },
+      cost: { budgetTotal, actualTotal, committedTotal, earnedValueTotal, cpi, cv, status: evm.costStatus },
       progress: { averagePhysicalProgress },
       cash: { cashInflow, cashOutflow, cashVariance },
       change: { totalVariationsCount, approvedVariationsValue, pendingVariationsValue },
       quality: { openNCRs, totalNCRs }
     };
-  }, [projectBOQItems, projectSchedules, projectCosts, projectCashFlow, projectVariations, projectQuality]);
+  }, [projectBOQItems, projectSchedules, projectCashFlow, projectVariations, projectQuality, approvedWirs, evm]);
 
 
   // 5. MATERIAL EXCEPTIONS SCANNER
@@ -334,7 +397,8 @@ export function IntegratedProjectControlsCockpit({
     setTooltipMeta(null);
   };
 
-  const money = (n: number) => {
+  const money = (n: number | null) => {
+    if (n === null || !Number.isFinite(n)) return 'Unavailable';
     return `$${n.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
   };
 
@@ -465,11 +529,11 @@ export function IntegratedProjectControlsCockpit({
             <span className="text-[10px] bg-sky-50 text-sky-700 border border-sky-200 px-2 py-0.5 rounded font-bold font-sans">2. الكميات</span>
           </div>
           <div className="mt-3">
-            <span className="text-xs text-slate-400 font-semibold block font-sans">معدل التنفيذ من الكميات المخططة</span>
-            <span className="text-2xl font-bold font-mono text-slate-800">{cockpitMetrics.quantity.qtyRatio.toFixed(1)}%</span>
+            <span className="text-xs text-slate-400 font-semibold block font-sans">طلبات الفحص المعتمدة حتى تاريخ البيانات</span>
+            <span className="text-2xl font-bold font-mono text-slate-800">{cockpitMetrics.quantity.approvedWirCount}</span>
           </div>
           <div className="mt-2 flex items-center justify-between border-t pt-2 text-[11px] text-slate-500">
-            <span className="font-sans">إجمالي المنفذ: <strong className="font-mono">{cockpitMetrics.quantity.totalExecutedQty.toLocaleString()} وحدة</strong></span>
+            <span className="font-sans">بنود تم فحصها: <strong className="font-mono">{cockpitMetrics.quantity.inspectedItemCount}</strong></span>
             <span className="font-sans text-sky-600 font-bold flex items-center gap-0.5">
               تفاصيل <ChevronRight className="w-3.5 h-3.5" />
             </span>
@@ -516,8 +580,8 @@ export function IntegratedProjectControlsCockpit({
           </div>
           <div className="mt-3">
             <span className="text-xs text-slate-400 font-semibold block font-sans">مؤشر كفاءة التكلفة (CPI)</span>
-            <span className={`text-2xl font-bold font-mono ${cockpitMetrics.cost.cpi >= 1 ? 'text-emerald-600' : 'text-rose-600'}`}>
-              {cockpitMetrics.cost.cpi.toFixed(2)}
+            <span className={`text-2xl font-bold font-mono ${cockpitMetrics.cost.cpi !== null && cockpitMetrics.cost.cpi >= 1 ? 'text-emerald-600' : 'text-rose-600'}`}>
+              {cockpitMetrics.cost.cpi === null ? 'Unavailable' : cockpitMetrics.cost.cpi.toFixed(2)}
             </span>
           </div>
           <div className="mt-2 flex items-center justify-between border-t pt-2 text-[11px] text-slate-500">
@@ -757,15 +821,15 @@ export function IntegratedProjectControlsCockpit({
               {/* CPI Bar */}
               <div className="space-y-2">
                 <div className="flex justify-between items-center text-xs">
-                  <span className="font-mono font-bold text-slate-700">{cockpitMetrics.cost.cpi.toFixed(2)}</span>
+                  <span className="font-mono font-bold text-slate-700">{cockpitMetrics.cost.cpi === null ? 'Unavailable' : cockpitMetrics.cost.cpi.toFixed(2)}</span>
                   <span className="text-slate-500 font-sans">مؤشر كفاءة التكلفة (CPI)</span>
                 </div>
                 <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden relative">
                   <div 
                     className={`h-full rounded-full transition-all duration-500 ${
-                      cockpitMetrics.cost.cpi >= 1 ? 'bg-emerald-500' : 'bg-rose-500'
+                      cockpitMetrics.cost.cpi !== null && cockpitMetrics.cost.cpi >= 1 ? 'bg-emerald-500' : 'bg-rose-500'
                     }`}
-                    style={{ width: `${Math.min(100, cockpitMetrics.cost.cpi * 75)}%` }}
+                    style={{ width: `${cockpitMetrics.cost.cpi === null ? 0 : Math.min(100, cockpitMetrics.cost.cpi * 75)}%` }}
                   />
                   {/* Mark at 1.0 (threshold) */}
                   <div className="absolute left-[75%] top-0 bottom-0 w-0.5 bg-slate-400" title="خط التعادل" />
@@ -1078,19 +1142,22 @@ export function IntegratedProjectControlsCockpit({
                           </tr>
                         </thead>
                         <tbody className="font-mono text-xs">
-                          {projectSchedules.filter(s => s.status === 'Completed' || s.status === 'In Progress' || s.activity_status === 'Completed').map((s, idx) => (
-                            <tr key={s.id} className="border-b hover:bg-slate-50">
-                              <td className="py-2.5 px-4 font-bold text-slate-900">WIR-2026-{String(idx + 1).padStart(3, '0')}</td>
-                              <td className="py-2.5 px-4 font-sans text-slate-700 font-medium">طلبات صب الخرسانة واستلام حديد التسليح - {s.activity}</td>
-                              <td className="py-2.5 px-4 text-center font-sans text-slate-600">Al-Gihaz Contracting Co.</td>
-                              <td className="py-2.5 px-4 text-center text-slate-500">2026-09-01</td>
+                          {approvedWirs.map(wir => {
+                            const activity = projectSchedules.find(row => row.id === wir.schedule_id);
+                            const boqItem = projectBOQItems.find(row => row.id === wir.boq_item_id);
+                            return (
+                            <tr key={wir.id} className="border-b hover:bg-slate-50">
+                              <td className="py-2.5 px-4 font-bold text-slate-900">{wir.wir_number || wir.id}</td>
+                              <td className="py-2.5 px-4 font-sans text-slate-700 font-medium">{activity?.activity || boqItem?.item_name || wir.work_type || '-'}</td>
+                              <td className="py-2.5 px-4 text-center font-sans text-slate-600">{wir.company_name || '-'}</td>
+                              <td className="py-2.5 px-4 text-center text-slate-500">{wir.inspection_date || '-'}</td>
                               <td className="py-2.5 px-4 text-center font-sans">
                                 <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                  معتمد هندسياً (Passed)
+                                  {wir.status || wir.result}
                                 </span>
                               </td>
                             </tr>
-                          ))}
+                          );})}
                         </tbody>
                       </table>
                     </div>

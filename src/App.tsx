@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { LayoutDashboard, FolderKanban, SquareCheck as CheckSquare, DollarSign, Package, ShieldAlert, TrendingUp, CalendarClock, Signature as FileSignature, ClipboardList, Banknote, Receipt, FileText, GitBranch, FolderOpen, FileCheck as FileCheck2, Building2, Menu, ListOrdered, HardHat, Wrench, ClipboardCheck, Layers, Download, Bell, CircleAlert, BrainCircuit, Maximize2, Minimize2, ArrowLeft, ArrowRight, Users, Gauge } from 'lucide-react';
 import { useData } from '@/hooks/useData';
-import { acceptProcurementReceipt, amendPurchaseOrder, approveCostChange, approvePaymentCertificate, approvePurchaseOrder, approveSupplierInvoice, approveVariation, assertBaselineApproval, assertRecordPeriodIsOpen, assertReportingPeriodDefinition, cancelPurchaseOrder, compareBaselineActivities, compareBaselineActivityDetails, compareBaselineRevisions, createBaselineActivitySnapshot, createBaselineDistributionSnapshot, createCodeDraft, dataRepository, prepareCodeControlledInsert, reverseCommercialPosting, reverseSupplierApPosting, reverseVariation, runDataQualityChecks, settlePaymentCertificate, settleSupplierInvoicePayment, STATUS_SETS, summarizeBaselineSchedule } from '@/data';
+import { acceptProcurementReceipt, amendPurchaseOrder, approveCostChange, approveCostPlanVersion, approvePaymentCertificate, approvePurchaseOrder, approveSupplierInvoice, approveVariation, assertBaselineApproval, assertRecordPeriodIsOpen, assertReportingPeriodDefinition, cancelPurchaseOrder, compareBaselineActivities, compareBaselineActivityDetails, compareBaselineRevisions, createBaselineActivitySnapshot, createBaselineDistributionSnapshot, createCodeDraft, dataRepository, issueReportVersion, prepareCodeControlledInsert, reverseCommercialPosting, reverseSupplierApPosting, reverseVariation, runDataQualityChecks, settlePaymentCertificate, settleSupplierInvoicePayment, STATUS_SETS, summarizeBaselineSchedule } from '@/data';
 import { Dashboard } from '@/components/Dashboard';
 import { DataTableView, type ColumnDef, type FilterDef, type SelectOption } from '@/components/DataTableView';
 import { ReportTemplateDesigner } from '@/components/ReportTemplateDesigner';
@@ -24,7 +24,7 @@ import { IntegratedProjectControlsCockpit } from '@/components/IntegratedProject
 import { VarianceActionRegisterView } from '@/components/VarianceActionRegisterView';
 import { useVarianceActions } from '@/hooks/useVarianceActions';
 import { ProjectDataDateProvider, useProjectDataDate } from '@/context/ProjectDataDateContext';
-import type { ViewKey, Project, ScheduleVersion, DelayEvent, WBSNode } from '@/types';
+import type { ViewKey, Project, ScheduleVersion, DelayEvent, WBSNode, ReportVersion } from '@/types';
 import { addCalendarDays, addWorkingDays, calendarShiftHours, distributedPlannedValueToDate, reconcileScheduleDistributions, scheduleBudget, schedulePlannedValueToDate, WORK_CALENDARS, workingDaysBetween } from '@/utils/schedulePlanning';
 import { calculatePmoSnapshot } from '@/utils/pmoSnapshot';
 import { calculateEvmAtDataDate } from '@/utils/evm';
@@ -2313,21 +2313,20 @@ function AppWorkspace() {
           boqItems={data.boqItems as Record<string, any>[]}
           baselines={data.baselines as Record<string, any>[]}
           controlAccounts={data.controlAccounts as Record<string, any>[]}
+          costPlanVersions={data.costPlanVersions as Record<string, any>[]}
           contractSovLines={data.contractSovLines as Record<string, any>[]}
           procurement={data.procurement as Record<string, any>[]}
           procurementReceipts={data.procurementReceipts as Record<string, any>[]}
           reportVersions={data.reportVersions as any[]}
+          reportTemplates={data.reportTemplates as any[]}
           onSaveReportVersion={async (version) => {
+            if (version.status === 'Issued') {
+              await issueReportVersion(version as ReportVersion);
+              await data.reload();
+              return;
+            }
             const inserted = await dataRepository.insert<Record<string, any>>('report_versions', version);
             data.applyLocalMutation('report_versions', { type: 'insert', row: inserted });
-          }}
-          onUpdateReportVersion={async (id, patch) => {
-            const updated = await dataRepository.update<Record<string, any>>('report_versions', id, patch);
-            data.applyLocalMutation('report_versions', { type: 'update', row: updated });
-          }}
-          onDeleteReportVersion={async (id) => {
-            await dataRepository.delete('report_versions', id);
-            data.applyLocalMutation('report_versions', { type: 'delete', id });
           }}
         />
       );
@@ -2355,6 +2354,7 @@ function AppWorkspace() {
           boqItems={data.boqItems}
           contractSovLines={data.contractSovLines}
           controlAccounts={data.controlAccounts}
+          costPlanVersions={data.costPlanVersions}
           cashFlow={data.cashFlow}
           subInvoices={data.subInvoices}
           clientInvoices={data.clientInvoices}
@@ -2437,6 +2437,15 @@ function AppWorkspace() {
             boqItems={data.boqItems as any[]}
             controlAccounts={data.controlAccounts as any[]}
             schedules={data.schedules as any[]}
+            contracts={data.contracts as any[]}
+            scheduleDistributions={data.scheduleDistributions as any[]}
+            baselines={data.baselines as any[]}
+            wirEntries={data.wirEntries as any[]}
+            progressCorrections={data.progressCorrections as any[]}
+            contractSovLines={data.contractSovLines as any[]}
+            costPlanVersions={data.costPlanVersions as any[]}
+            procurement={data.procurement as any[]}
+            procurementReceipts={data.procurementReceipts as any[]}
             reportingPeriods={data.reportingPeriods as any[]}
             variations={data.variations as any[]}
             quality={data.quality as any[]}
@@ -4451,6 +4460,14 @@ function AppWorkspace() {
         costCodes={data.costCodes}
         costPlanVersions={data.costPlanVersions}
         onSaveVersion={async (version) => {
+          if (version.status === 'Approved') {
+            if (!("__TAURI_INTERNALS__" in window)) {
+              throw new Error('Cost plan approval requires the governed desktop database workflow.');
+            }
+            await approveCostPlanVersion(version);
+            await data.reload();
+            return;
+          }
           if (data.costPlanVersions.some((v) => v.id === version.id)) {
             const updated = await dataRepository.update<Record<string, any>>('cost_plan_versions', version.id, version);
             data.applyLocalMutation('cost_plan_versions', { type: 'update', row: updated });

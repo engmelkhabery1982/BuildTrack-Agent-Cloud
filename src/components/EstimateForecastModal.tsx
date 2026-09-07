@@ -4,8 +4,9 @@ import {
   X, Check, AlertTriangle, Shield, TrendingUp, Sliders, FileText, BarChart2, Calendar, User, Save, RefreshCw, ChevronRight, CheckCircle2, AlertOctagon
 } from 'lucide-react';
 import { useData } from '@/hooks/useData';
-import { dataRepository } from '@/data';
+import { approveEstimateVersion, dataRepository } from '@/data';
 import type { EstimateVersion, EstimateLine, ControlAccount } from '@/types';
+import { calculateEvmAtDataDate } from '@/utils/evm';
 
 interface EstimateForecastModalProps {
   isOpen: boolean;
@@ -13,7 +14,7 @@ interface EstimateForecastModalProps {
   selectedProjectId?: string;
   selectedContractId?: string;
   selectedControlAccountId?: string;
-  onSaved?: () => void;
+  onSaved?: () => void | Promise<void>;
 }
 
 export function EstimateForecastModal({
@@ -35,6 +36,10 @@ export function EstimateForecastModal({
     wirEntries,
     boqItems,
     progressCorrections,
+    schedules,
+    scheduleDistributions,
+    baselines,
+    contractSovLines,
     estimateVersions,
     applyLocalMutation,
   } = useData();
@@ -106,9 +111,10 @@ export function EstimateForecastModal({
       const matchProj = !projectId || ca.project_id === projectId;
       const matchCont = !contractId || ca.contract_id === contractId;
       const matchActive = ca.status !== 'Inactive' && ca.status !== 'Closed';
-      return matchProj && matchCont && matchActive;
+      const matchAccount = !controlAccountId || ca.id === controlAccountId;
+      return matchProj && matchCont && matchActive && matchAccount;
     });
-  }, [controlAccounts, projectId, contractId]);
+  }, [controlAccounts, projectId, contractId, controlAccountId]);
 
   // Helper date utility
   const datedThrough = (dateStr: any, cutoff: string) => {
@@ -123,13 +129,13 @@ export function EstimateForecastModal({
     return filteredControlAccounts.map(account => {
       const accountId = account.id;
 
-      // BAC: from approved cost plans or fallback to control account budget
+      // D1 is the governed Delivery Cost plan source. Revenue BAC and an
+      // unapproved control-account draft are never forecast substitutes.
       const relatedCostPlans = costPlanVersions.filter(
         v => v.control_account_id === accountId && v.status === 'Approved'
       );
-      const bac = relatedCostPlans.length > 0 
-        ? relatedCostPlans.reduce((sum, p) => sum + (Number(p.delivery_cost_bac) || 0), 0)
-        : (Number(account.budget_amount) || 0);
+      const approvedCostPlan = relatedCostPlans[0];
+      const bac = approvedCostPlan ? Number(approvedCostPlan.delivery_cost_bac) || 0 : 0;
 
       // PV: Planned Value through dataDate
       const pv = relatedCostPlans.reduce((sum, p) => {
@@ -137,77 +143,48 @@ export function EstimateForecastModal({
         return sum + periodsThrough.reduce((pSum, pd) => pSum + (Number(pd.planned_cost) || 0), 0);
       }, 0);
 
-      // EV: Earned Value through dataDate
-      // Based on percentage progress or linked measurement methods
-      const ev = relatedCostPlans.reduce((sum, p) => {
-        const periodsThrough = (p.periods || []).filter(pd => datedThrough(pd.period_end, dataDate));
-        // Earned is often weight_pct * BAC if work inspected
-        return sum + periodsThrough.reduce((pSum, pd) => pSum + ((Number(pd.planned_cost) || 0) * (pd.is_closed_period ? 1 : 0.8)), 0);
-      }, 0) || (bac * 0.4); // fallback 40% if no plan for testing / display
-
-      // AC: Actual Cost
-      // Direct cost entries + accepted procurement receipts assigned to this control account
-      const directAc = costEntries
-        .filter(entry => entry.control_account_id === accountId && datedThrough(entry.date, dataDate))
-        .reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
-
-      // Accepted Receipts not yet posted to cost entries
-      const postedReceiptIds = new Set(
-        costEntries
-          .filter(entry => entry.control_account_id === accountId && entry.source_type === 'procurement_receipt')
-          .map(entry => String(entry.source_id || ''))
-      );
-
-      const receipts = procurementReceipts.filter(r => {
-        const isSelf = r.control_account_id === accountId;
-        const linkedPo = procurement.find(p => p.id === r.procurement_id);
-        const isPoLinked = linkedPo?.control_account_id === accountId;
-        return (isSelf || isPoLinked) && r.status === 'Accepted' && datedThrough(r.receipt_date, dataDate);
+      const accountBoqId = String(account.boq_item_id || '');
+      const belongsToAccount = (row: Record<string, any>) => String(row.control_account_id || '') === accountId
+        || (!row.control_account_id && accountBoqId && String(row.boq_item_id || '') === accountBoqId);
+      const accountOrders = procurement.filter(belongsToAccount);
+      const accountOrderIds = new Set(accountOrders.map((row) => String(row.id)));
+      const accountReceipts = procurementReceipts.filter((row) => belongsToAccount(row)
+        || accountOrderIds.has(String(row.procurement_id || '')));
+      const performanceContractIds = contracts
+        .filter((row) => row.id === contractId || row.parent_main_contract_id === contractId)
+        .map((row) => row.id);
+      const evm = calculateEvmAtDataDate({
+        contractIds: [contractId], performanceContractIds, dataDate,
+        schedules: schedules.filter(belongsToAccount), scheduleDistributions, baselines,
+        wirEntries: wirEntries.filter(belongsToAccount), progressCorrections, boqItems,
+        costEntries: costEntries.filter(belongsToAccount), controlAccounts: [account],
+        contractSovLines: contractSovLines.filter((line) => line.id === account.contract_sov_line_id),
+        procurement: accountOrders, procurementReceipts: accountReceipts,
       });
-
-      const receiptAc = receipts
-        .filter(r => !postedReceiptIds.has(String(r.id)))
-        .reduce((sum, r) => {
-          const val = Number(r.accepted_amount) || ((Number(r.accepted_quantity) || 0) * (Number(r.unit_cost) || 0));
-          return sum + val;
-        }, 0);
-
-      const ac = directAc + receiptAc;
-
-      // Open Commitments
-      const linkedPos = procurement.filter(po => {
-        return po.control_account_id === accountId && datedThrough(po.order_date, dataDate);
-      });
-
-      const openCommitment = linkedPos.reduce((sum, po) => {
-        const poVal = Number(po.total_cost) || ((Number(po.quantity) || 0) * (Number(po.unit_cost) || 0));
-        const poReceipts = receipts.filter(r => r.procurement_id === po.id);
-        const poReceiptsVal = poReceipts.reduce((pSum, r) => {
-          return pSum + (Number(r.accepted_amount) || ((Number(r.accepted_quantity) || 0) * (Number(r.unit_cost) || 0)));
-        }, 0);
-        return sum + Math.max(0, poVal - poReceiptsVal);
-      }, 0);
+      const ev = evm.cost.EV;
+      const ac = evm.cost.AC;
+      const openCommitment = evm.cost.openCommitment;
 
       // EVM Performance Factors
-      const cpi = ac > 0 ? ev / ac : 1;
-      const spi = pv > 0 ? ev / pv : 1;
+      const cpi = ev !== null && ac > 0 ? ev / ac : null;
+      const spi = ev !== null && pv > 0 ? ev / pv : null;
 
       // Compute ETC based on selected governing method
       let etc = 0;
       let calculatedMethod = method;
 
       if (method === 'Bottom-up') {
-        etc = Math.max(0, bac - ev);
+        etc = ev === null ? 0 : Math.max(0, bac - ev);
       } else if (method === 'Remaining Budget') {
         etc = Math.max(0, bac - ac);
       } else if (method === 'CPI') {
-        const factor = cpi > 0 ? cpi : 1;
-        etc = Math.max(0, (bac - ev) / factor);
+        const factor = cpi && cpi > 0 ? cpi : null;
+        etc = factor !== null && ev !== null ? Math.max(0, (bac - ev) / factor) : 0;
       } else if (method === 'CPI-SPI') {
-        const factor = (cpi * spi) > 0 ? (cpi * spi) : 1;
-        etc = Math.max(0, (bac - ev) / factor);
+        const factor = cpi !== null && spi !== null && cpi * spi > 0 ? cpi * spi : null;
+        etc = factor !== null && ev !== null ? Math.max(0, (bac - ev) / factor) : 0;
       } else if (method === 'Manual') {
-        etc = manualEtc[accountId] !== undefined ? manualEtc[accountId] : Math.max(0, bac - ev);
+        etc = manualEtc[accountId] !== undefined ? manualEtc[accountId] : 0;
       }
 
       // Round ETC cleanly
@@ -219,7 +196,9 @@ export function EstimateForecastModal({
       const floorValue = ac + openCommitment;
       const isFloorViolation = fac < floorValue - 0.01; // small float tolerance
       const waiver = waivers[accountId] || { documented: false, reason: '' };
-      const isBlocked = isFloorViolation && !waiver.documented;
+      const missingApprovedCostPlan = !approvedCostPlan;
+      const missingMeasuredEv = ev === null;
+      const isBlocked = missingApprovedCostPlan || missingMeasuredEv || (isFloorViolation && !waiver.documented);
 
       return {
         control_account_id: accountId,
@@ -236,6 +215,8 @@ export function EstimateForecastModal({
         fac,
         vac,
         isFloorViolation,
+        missingApprovedCostPlan,
+        missingMeasuredEv,
         waiver,
         isBlocked,
         notes: manualNotes[accountId] || '',
@@ -247,6 +228,11 @@ export function EstimateForecastModal({
     costEntries,
     procurement,
     procurementReceipts,
+    schedules,
+    scheduleDistributions,
+    baselines,
+    contractSovLines,
+    contracts,
     dataDate,
     method,
     manualEtc,
@@ -256,10 +242,10 @@ export function EstimateForecastModal({
 
   // Verification if saving is permitted
   const isFormValid = useMemo(() => {
-    if (!projectId || !contractId || !versionCode || !versionName || !dataDate || !owner) return false;
+    if (!projectId || !contractId || !controlAccountId || !versionCode || !versionName || !dataDate || !owner) return false;
     // Check if any calculation lines are blocked by floor rule without documented waiver
     return !calculationLines.some(line => line.isBlocked);
-  }, [projectId, contractId, versionCode, versionName, dataDate, owner, calculationLines]);
+  }, [projectId, contractId, controlAccountId, versionCode, versionName, dataDate, owner, calculationLines]);
 
   // Comparison metrics mapping
   const comparisonData = useMemo(() => {
@@ -299,7 +285,7 @@ export function EstimateForecastModal({
         updated_at: new Date().toISOString(),
         project_id: projectId,
         contract_id: contractId,
-        control_account_id: controlAccountId || filteredControlAccounts[0]?.id || '',
+        control_account_id: controlAccountId,
         version_code: versionCode,
         version_name: versionName,
         revision_number: estimateVersions.length + 1,
@@ -317,7 +303,7 @@ export function EstimateForecastModal({
           version_id: versionId,
           control_account_id: line.control_account_id,
           planned_value: line.pv,
-          earned_value: line.ev,
+          earned_value: line.ev ?? 0,
           actual_cost: line.ac,
           open_commitment: line.openCommitment,
           etc: line.etc,
@@ -329,16 +315,17 @@ export function EstimateForecastModal({
         })),
       };
 
-      await dataRepository.insert('estimate_versions', payload);
-      applyLocalMutation('estimate_versions', { type: 'insert', row: payload });
-
-      // If approved, notify local DB update
       if (status === 'Approved') {
-        // Automatically supercedes previous approved version in repository
-        applyLocalMutation('estimate_versions', { type: 'update', row: { ...payload, status: 'Approved' } });
+        if (!("__TAURI_INTERNALS__" in window)) {
+          throw new Error('Estimate approval requires the governed desktop database workflow.');
+        }
+        await approveEstimateVersion(payload);
+      } else {
+        await dataRepository.insert('estimate_versions', payload);
+        applyLocalMutation('estimate_versions', { type: 'insert', row: payload });
       }
 
-      if (onSaved) onSaved();
+      if (onSaved) await onSaved();
       onClose();
     } catch (err: any) {
       setErrorMessage(err?.message || 'Failed to save governed estimate version.');
@@ -697,16 +684,16 @@ export function EstimateForecastModal({
                                 <div className="text-[10px] text-slate-500 max-w-[200px] truncate">{line.title}</div>
                               </td>
                               <td className="p-3 font-semibold text-slate-700">${line.bac.toLocaleString()}</td>
-                              <td className="p-3 text-slate-600">${line.ev.toLocaleString()}</td>
+                              <td className="p-3 text-slate-600">{line.ev === null ? 'Unavailable' : `$${line.ev.toLocaleString()}`}</td>
                               <td className="p-3 text-slate-800 font-medium">${line.ac.toLocaleString()}</td>
                               <td className="p-3 text-amber-700 font-medium">${line.openCommitment.toLocaleString()}</td>
                               <td className="p-3 text-slate-600">
-                                <span className={line.cpi >= 1 ? 'text-green-600' : 'text-amber-600'}>
-                                  {line.cpi.toFixed(2)}
+                                <span className={(line.cpi ?? 0) >= 1 ? 'text-green-600' : 'text-amber-600'}>
+                                  {line.cpi === null ? 'N/A' : line.cpi.toFixed(2)}
                                 </span>
                                 <span className="mx-1 text-slate-300">/</span>
-                                <span className={line.spi >= 1 ? 'text-green-600' : 'text-amber-600'}>
-                                  {line.spi.toFixed(2)}
+                                <span className={(line.spi ?? 0) >= 1 ? 'text-green-600' : 'text-amber-600'}>
+                                  {line.spi === null ? 'N/A' : line.spi.toFixed(2)}
                                 </span>
                               </td>
                               
@@ -734,6 +721,12 @@ export function EstimateForecastModal({
 
                               <td className="p-3">
                                 <div className="flex flex-col space-y-2">
+                                  {line.missingApprovedCostPlan && (
+                                    <div className="text-[10px] font-bold text-red-700">Approved D1 cost plan required.</div>
+                                  )}
+                                  {line.missingMeasuredEv && (
+                                    <div className="text-[10px] font-bold text-red-700">Measured EV is unavailable; no value was fabricated.</div>
+                                  )}
                                   {/* Floor Rule check */}
                                   {line.isFloorViolation ? (
                                     <div className="flex flex-col space-y-1">

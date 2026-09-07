@@ -1139,7 +1139,9 @@ export interface ReportTemplate {
 
 export interface ReportVersion {
   id: string;
-  project_id: string;
+  /** Null represents an explicitly portfolio-scoped report. */
+  project_id: string | null;
+  contract_id?: string | null;
   data_date: string;
   pack_type: string;
   template_id?: string | null;
@@ -1377,9 +1379,11 @@ export interface VarianceActionItem {
   materiality: number;
   assignedTo: string;
   dueDate: string;
-  status: 'Open' | 'In Progress' | 'Closed';
+  status: 'Open' | 'Assigned' | 'In Progress' | 'Resolved' | 'Closed';
   comments?: string;
   evidence?: string;
+  resolution?: string;
+  status_history?: string;
   escalation_level?: number;
   escalation_history?: string;
   createdDate: string;
@@ -1587,6 +1591,7 @@ export interface CostPlanVersion {
   data_date: string;
   delivery_cost_bac: number;
   curve_type: DeliveryCostCurveType;
+  frequency?: 'monthly' | 'weekly' | 'quarterly';
   start_date: string;
   end_date: string;
   periods_count: number;

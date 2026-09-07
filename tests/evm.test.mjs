@@ -65,3 +65,27 @@ test('EVM applies posted progress reversals in their effective reporting period 
   assert.equal(beforeCorrection.EV, 400);
   assert.equal(afterCorrection.EV, 250);
 });
+
+test('EVM consumes the approved D1 cost plan for Delivery BAC and time-phased PV', () => {
+  const result = evm.calculateEvmAtDataDate({
+    contractIds: ['c1'], dataDate: '2026-01-31',
+    schedules: [{ id: 'a1', contract_id: 'c1', control_account_id: 'ca1', boq_item_id: 'b1', activity: 'Install', start_date: '2026-01-01', end_date: '2026-02-28', planned_quantity: 100, unit_rate: 10 }],
+    scheduleDistributions: [], baselines: [],
+    boqItems: [{ id: 'b1', quantity: 100, unit_rate: 10 }],
+    wirEntries: [{ contract_id: 'c1', control_account_id: 'ca1', boq_item_id: 'b1', quantity: 50, inspection_date: '2026-01-20', status: 'Approved' }],
+    costEntries: [{ contract_id: 'c1', control_account_id: 'ca1', date: '2026-01-20', amount: 100 }],
+    controlAccounts: [{ id: 'ca1', contract_id: 'c1', boq_item_id: 'b1', contract_sov_line_id: 'sov1', status: 'Active' }],
+    contractSovLines: [{ id: 'sov1', status: 'Active', original_budget: 800 }],
+    costPlanVersions: [{
+      id: 'cp1', control_account_id: 'ca1', status: 'Approved', delivery_cost_bac: 600,
+      periods: [
+        { period_end: '2026-01-31', planned_cost: 200 },
+        { period_end: '2026-02-28', planned_cost: 400 },
+      ],
+    }],
+  });
+  assert.equal(result.cost.BAC, 600, 'approved D1 BAC overrides the older SOV budget basis');
+  assert.equal(result.cost.PV, 200, 'cost PV comes from D1 periods through Data Date');
+  assert.equal(result.cost.EV, 300, 'measured 50% progress is valued against Delivery Cost BAC');
+  assert.equal(result.cost.AC, 100);
+});

@@ -75,6 +75,14 @@ type StoredRow = {
   time_impact_analysis?: string;
   notes?: string;
   updated_at?: string;
+  pack_type?: string;
+  template_id?: string | null;
+  snapshot_hash?: string;
+  snapshot_payload?: string;
+  issuer?: string;
+  sign_off_note?: string;
+  issued_at?: string | null;
+  superseded_by?: string | null;
   payload: string;
 };
 
@@ -205,6 +213,22 @@ export class SqliteRepository implements DataRepository {
         notes: stored.notes || '',
         updated_at: (stored as any).updated_at,
         lines: payload.lines || [],
+      });
+    } else if (tableName === 'report_versions') {
+      Object.assign(payload, {
+        project_id: stored.project_id,
+        contract_id: stored.contract_id,
+        data_date: stored.data_date,
+        pack_type: stored.pack_type,
+        template_id: stored.template_id,
+        version_code: stored.version_code,
+        status: stored.status,
+        snapshot_hash: stored.snapshot_hash,
+        snapshot_payload: stored.snapshot_payload,
+        issuer: stored.issuer,
+        sign_off_note: stored.sign_off_note || '',
+        issued_at: stored.issued_at,
+        superseded_by: stored.superseded_by,
       });
     }
     return payload as T;
@@ -422,19 +446,34 @@ export class SqliteRepository implements DataRepository {
           record.notes || '', JSON.stringify(record),
         ],
       );
+    } else if (tableName === "report_versions") {
+      if (record.status !== 'Draft') {
+        throw new Error('Issued reports must use the governed atomic issuance workflow.');
+      }
+      if (!record.version_code?.trim() || !record.pack_type?.trim() || !record.data_date) {
+        throw new Error('Report draft requires version code, pack type, and Data Date.');
+      }
+      await database.execute(
+        `INSERT INTO report_versions (
+          id,created_at,project_id,contract_id,data_date,pack_type,template_id,version_code,status,
+          snapshot_hash,snapshot_payload,issuer,sign_off_note,issued_at,superseded_by,payload
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+        [
+          record.id, record.created_at, nullableId(record.project_id), nullableId(record.contract_id),
+          record.data_date, record.pack_type.trim(), nullableId(record.template_id), record.version_code.trim(),
+          'Draft', record.snapshot_hash, record.snapshot_payload, record.issuer || '', record.sign_off_note || '',
+          null, null, JSON.stringify(record),
+        ],
+      );
     } else if (tableName === "cost_plan_versions") {
+      if (record.status === 'Approved') {
+        throw new Error('Approved cost plans must use the governed atomic approval workflow.');
+      }
       if (!record.project_id) throw new Error('Cost plan requires a valid project_id.');
       if (!record.contract_id) throw new Error('Cost plan requires a valid contract_id.');
       if (!record.control_account_id) throw new Error('Cost plan requires a valid control_account_id.');
       if (!record.delivery_cost_bac || Number(record.delivery_cost_bac) <= 0) {
         throw new Error('Cost plan requires a positive Delivery Cost BAC.');
-      }
-      if (record.status === 'Approved') {
-        await database.execute(
-          `UPDATE cost_plan_versions SET status = 'Superseded', updated_at = CURRENT_TIMESTAMP
-           WHERE project_id = $1 AND contract_id = $2 AND control_account_id = $3 AND status = 'Approved'`,
-          [record.project_id, record.contract_id, record.control_account_id]
-        );
       }
       await database.execute(
         `INSERT INTO cost_plan_versions (
@@ -486,16 +525,12 @@ export class SqliteRepository implements DataRepository {
         }
       }
     } else if (tableName === "estimate_versions") {
+      if (record.status === 'Approved') {
+        throw new Error('Approved estimates must use the governed atomic approval workflow.');
+      }
       if (!record.project_id) throw new Error('Estimate requires a valid project_id.');
       if (!record.contract_id) throw new Error('Estimate requires a valid contract_id.');
       if (!record.control_account_id) throw new Error('Estimate requires a valid control_account_id.');
-      if (record.status === 'Approved') {
-        await database.execute(
-          `UPDATE estimate_versions SET status = 'Superseded', updated_at = CURRENT_TIMESTAMP
-           WHERE project_id = $1 AND contract_id = $2 AND control_account_id = $3 AND status = 'Approved'`,
-          [record.project_id, record.contract_id, record.control_account_id]
-        );
-      }
       await database.execute(
         `INSERT INTO estimate_versions (
           id, created_at, updated_at, project_id, contract_id, control_account_id,
@@ -686,6 +721,9 @@ export class SqliteRepository implements DataRepository {
       );
     } else if (tableName === "cost_plan_versions") {
       record.updated_at = new Date().toISOString();
+      if (record.status === 'Approved') {
+        throw new Error('Approved cost plans must use the governed atomic approval workflow.');
+      }
       const existingRows = await database.select<StoredRow[]>(
         `SELECT * FROM cost_plan_versions WHERE id = $1`, [id]
       );
@@ -696,13 +734,6 @@ export class SqliteRepository implements DataRepository {
         if (existingRows[0].status === 'Approved' && record.status !== 'Superseded') {
           throw new Error('Approved cost plan versions are immutable control points and may only transition to Superseded.');
         }
-      }
-      if (record.status === 'Approved') {
-        await database.execute(
-          `UPDATE cost_plan_versions SET status = 'Superseded', updated_at = CURRENT_TIMESTAMP
-           WHERE project_id = $1 AND contract_id = $2 AND control_account_id = $3 AND status = 'Approved' AND id <> $4`,
-          [record.project_id, record.contract_id, record.control_account_id, id]
-        );
       }
       await database.execute(
         `UPDATE cost_plan_versions SET
@@ -757,6 +788,9 @@ export class SqliteRepository implements DataRepository {
       }
     } else if (tableName === "estimate_versions") {
       record.updated_at = new Date().toISOString();
+      if (record.status === 'Approved') {
+        throw new Error('Approved estimates must use the governed atomic approval workflow.');
+      }
       const existingRows = await database.select<StoredRow[]>(
         `SELECT * FROM estimate_versions WHERE id = $1`, [id]
       );
@@ -767,13 +801,6 @@ export class SqliteRepository implements DataRepository {
         if (existingRows[0].status === 'Approved' && record.status !== 'Superseded') {
           throw new Error('Approved estimate versions are immutable control points and may only transition to Superseded.');
         }
-      }
-      if (record.status === 'Approved') {
-        await database.execute(
-          `UPDATE estimate_versions SET status = 'Superseded', updated_at = CURRENT_TIMESTAMP
-           WHERE project_id = $1 AND contract_id = $2 AND control_account_id = $3 AND status = 'Approved' AND id <> $4`,
-          [record.project_id, record.contract_id, record.control_account_id, id]
-        );
       }
       await database.execute(
         `UPDATE estimate_versions SET
@@ -820,6 +847,21 @@ export class SqliteRepository implements DataRepository {
           );
         }
       }
+    } else if (tableName === "report_versions") {
+      if ((existing as any).status !== 'Draft') {
+        throw new Error('Issued or Superseded reports are immutable.');
+      }
+      if (record.status !== 'Draft') {
+        throw new Error('Report issuance must use the governed atomic issuance workflow.');
+      }
+      await database.execute(
+        `UPDATE report_versions SET project_id=$1,contract_id=$2,data_date=$3,pack_type=$4,template_id=$5,
+          version_code=$6,status='Draft',snapshot_hash=$7,snapshot_payload=$8,issuer=$9,sign_off_note=$10,payload=$11
+         WHERE id=$12`,
+        [nullableId(record.project_id), nullableId(record.contract_id), record.data_date, record.pack_type,
+          nullableId(record.template_id), record.version_code, record.snapshot_hash, record.snapshot_payload,
+          record.issuer || '', record.sign_off_note || '', JSON.stringify(record), id],
+      );
     } else if (tableName === "progress_corrections") {
       await database.execute(
         `UPDATE progress_corrections
@@ -862,9 +904,12 @@ export class SqliteRepository implements DataRepository {
   async delete(tableName: string, id: string): Promise<void> {
     assertKnownTable(tableName);
     const existing = this.unpack<Record<string, any>>(await this.findStored(id, tableName), tableName);
-    if (tableName === 'cost_plan_versions' || tableName === 'estimate_versions') {
+    if (tableName === 'cost_plan_versions' || tableName === 'estimate_versions' || tableName === 'report_versions') {
       if (['Approved', 'Superseded'].includes(existing.status)) {
         throw new Error(`Approved or Superseded ${tableName} cannot be deleted.`);
+      }
+      if (tableName === 'report_versions' && existing.status === 'Issued') {
+        throw new Error('Issued reports cannot be deleted.');
       }
     }
     const database = await this.database();

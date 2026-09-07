@@ -21,6 +21,9 @@ export {
 export { runDataQualityChecks } from "./dataQuality";
 export { approveSupplierInvoice, settleSupplierInvoicePayment, approvePurchaseOrder, acceptProcurementReceipt, cancelPurchaseOrder, amendPurchaseOrder, reverseSupplierApPosting } from "./supplierAp";
 export { approveCostChange, approveVariation, approvePaymentCertificate, settlePaymentCertificate, reverseCommercialPosting, reverseVariation } from "./commercialWorkflow";
+export { issueReportVersion } from "./reportVersioning";
+export { approveCostPlanVersion } from "./costPlanVersioning";
+export { approveEstimateVersion } from "./estimateVersioning";
 export { CANONICAL_FIELDS, IMPORT_FIELD_ALIASES, STATUS_SETS, isCanonicalStatus } from "./dataDictionary";
 export {
   assertCodeCanBeLocked,
