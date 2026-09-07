@@ -56,6 +56,21 @@
   `FEATURE_READ_PACKS_AR.md`; do not start F3 and do not claim F2 accepted.
 - Full evidence: `docs/agent-results/CODEX_F1_F2_VERIFICATION_2026-09-07.md`.
 
+## تحديث التسليم — F1 (Labor Timesheet Approval & Actual-Cost Posting)
+
+- Agent/model: Google AI Studio Build Agent (Gemini 3.6 Flash)
+- Current feature: `F1 — Labor Timesheet Approval & Actual-Cost Posting`
+- Status: `REPAIRED & VERIFIED — READY FOR CODEX GATE / F2 UNLOCK`
+- Evidence:
+  - Rust backend commands: `submit_labor_timesheet`, `approve_labor_timesheet`, `post_labor_timesheet`, `reverse_labor_timesheet` with strict state transitions (`Draft -> Submitted -> Approved -> Posted -> Reversed`).
+  - Implemented `write_audit_log` audit logging and `supplier_ap_mutation_guard` locks for atomic operations.
+  - Actual-cost ledger posting with cost entry type `Timesheet` and negative offsetting reversals.
+  - UI component `LaborTimesheetModal.tsx` connected to data repository and workflow commands.
+  - Generic CRUD in `src/App.tsx` guarded against direct modification of approved/posted timesheets.
+  - Validation engine enforcing locked reporting periods, work calendar non-working day overrides, duplicate worker shifts, active worker status, and scope matching.
+  - Quality verification: `npm run lint` clean (0 errors), `compile_applet` passed, 205/205 tests passed.
+- Exact next action: Codex review gate for F1, then proceed with F2 (Equipment Meter, Hours & Fuel Posting).
+
 ## تحديث التسليم — E2
 
 - Agent/model: Google AI Studio Build Agent (Gemini 3.6 Flash)

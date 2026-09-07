@@ -204,13 +204,58 @@ test('validateLaborTimesheet prevents logging in locked reporting periods', () =
   assert.ok(issues.some((i) => i.message.includes('Locked reporting period')));
 });
 
-test('F1 Rust backend labor_timesheet module provides atomic approve, post, and reverse commands', () => {
+test('validateLaborTimesheet enforces override reason for non-working calendar days', () => {
+  const header = {
+    project_id: 'PRJ-1',
+    contract_id: 'CTR-1',
+    timesheet_number: 'TS-2026-001',
+    work_date: '2026-09-04', // Friday
+    shift: 'Day',
+    submitter: 'Engineer A',
+  };
+
+  const lines = [
+    {
+      resource_id: 'RES-1',
+      schedule_activity_id: 'ACT-1',
+      control_account_id: 'CA-1',
+      regular_hours: 8,
+      overtime_hours: 0,
+      regular_rate: 50,
+      overtime_rate: 75,
+      non_working_override_reason: '',
+    },
+  ];
+
+  const resourceMasters = [{ id: 'RES-1', name: 'Worker 1', resource_type: 'Labor', status: 'Active' }];
+  const schedules = [{ id: 'ACT-1', project_id: 'PRJ-1', contract_id: 'CTR-1' }];
+  const controlAccounts = [{ id: 'CA-1', project_id: 'PRJ-1', contract_id: 'CTR-1' }];
+  const workCalendars = [
+    {
+      project_id: 'PRJ-1',
+      working_days: [0, 1, 2, 3, 4], // Sun-Thu (Fri=5 is non-working)
+      holidays: [],
+    },
+  ];
+
+  const issues = validateLaborTimesheet(header, lines, {
+    resourceMasters,
+    schedules,
+    controlAccounts,
+    workCalendars,
+  });
+  assert.ok(issues.some((i) => i.message.includes('non-working calendar day')));
+});
+
+test('F1 Rust backend labor_timesheet module provides atomic submit, approve, post, and reverse commands', () => {
   const rustModule = read('src-tauri/src/labor_timesheet.rs');
+  assert.match(rustModule, /pub async fn submit_labor_timesheet/);
   assert.match(rustModule, /pub async fn approve_labor_timesheet/);
   assert.match(rustModule, /pub async fn post_labor_timesheet/);
   assert.match(rustModule, /pub async fn reverse_labor_timesheet/);
   assert.match(rustModule, /guard_on/);
   assert.match(rustModule, /guard_off/);
+  assert.match(rustModule, /write_audit_log/);
   assert.match(rustModule, /cost_entries/);
   assert.match(rustModule, /LaborTimesheet/);
   assert.match(rustModule, /tx\.commit\(\)/);

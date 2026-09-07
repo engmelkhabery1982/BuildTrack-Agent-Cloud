@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { LayoutDashboard, FolderKanban, SquareCheck as CheckSquare, DollarSign, Package, ShieldAlert, TrendingUp, CalendarClock, Signature as FileSignature, ClipboardList, Banknote, Receipt, FileText, GitBranch, FolderOpen, FileCheck as FileCheck2, Building2, Menu, ListOrdered, HardHat, Wrench, ClipboardCheck, Layers, Download, Bell, CircleAlert, BrainCircuit, Maximize2, Minimize2, ArrowLeft, ArrowRight, Users, Gauge } from 'lucide-react';
 import { useData } from '@/hooks/useData';
-import { acceptProcurementReceipt, amendPurchaseOrder, approveCostChange, approveCostPlanVersion, approvePaymentCertificate, approvePurchaseOrder, approveSupplierInvoice, approveVariation, assertBaselineApproval, assertRecordPeriodIsOpen, assertReportingPeriodDefinition, cancelPurchaseOrder, compareBaselineActivities, compareBaselineActivityDetails, compareBaselineRevisions, createBaselineActivitySnapshot, createBaselineDistributionSnapshot, createCodeDraft, dataRepository, issueReportVersion, prepareCodeControlledInsert, reverseCommercialPosting, reverseSupplierApPosting, reverseVariation, runDataQualityChecks, settlePaymentCertificate, settleSupplierInvoicePayment, STATUS_SETS, summarizeBaselineSchedule } from '@/data';
+import { acceptProcurementReceipt, amendPurchaseOrder, approveCostChange, approveCostPlanVersion, approvePaymentCertificate, approvePurchaseOrder, approveSupplierInvoice, approveVariation, assertBaselineApproval, assertRecordPeriodIsOpen, assertReportingPeriodDefinition, cancelPurchaseOrder, compareBaselineActivities, compareBaselineActivityDetails, compareBaselineRevisions, createBaselineActivitySnapshot, createBaselineDistributionSnapshot, createCodeDraft, dataRepository, issueReportVersion, prepareCodeControlledInsert, reverseCommercialPosting, reverseSupplierApPosting, reverseVariation, runDataQualityChecks, settlePaymentCertificate, settleSupplierInvoicePayment, STATUS_SETS, summarizeBaselineSchedule, submitLaborTimesheet, approveLaborTimesheet, postLaborTimesheet, reverseLaborTimesheet } from '@/data';
 import { Dashboard } from '@/components/Dashboard';
 import { DataTableView, type ColumnDef, type FilterDef, type SelectOption } from '@/components/DataTableView';
 import { ReportTemplateDesigner } from '@/components/ReportTemplateDesigner';
@@ -20,6 +20,7 @@ import { CostPlanModal } from '@/components/CostPlanModal';
 import { EstimateForecastModal } from '@/components/EstimateForecastModal';
 import { CommitmentReconciliationModal } from '@/components/CommitmentReconciliationModal';
 import { CostVarianceDrillDownModal } from '@/components/CostVarianceDrillDownModal';
+import { LaborTimesheetModal } from '@/components/LaborTimesheetModal';
 import { IntegratedProjectControlsCockpit } from '@/components/IntegratedProjectControlsCockpit';
 import { VarianceActionRegisterView } from '@/components/VarianceActionRegisterView';
 import { useVarianceActions } from '@/hooks/useVarianceActions';
@@ -1106,6 +1107,8 @@ function AppWorkspace() {
   const [estimateModalOpen, setEstimateModalOpen] = useState(false);
   const [commitmentReconcileOpen, setCommitmentReconcileOpen] = useState(false);
   const [costVarianceDrillDownOpen, setCostVarianceDrillDownOpen] = useState(false);
+  const [laborTimesheetModalOpen, setLaborTimesheetModalOpen] = useState(false);
+  const [selectedLaborTimesheet, setSelectedLaborTimesheet] = useState<any | null>(null);
   const { dataDate: unifiedDataDate } = useProjectDataDate();
   const data = useData();
   const {
@@ -4425,6 +4428,38 @@ function AppWorkspace() {
           }
           if (['Approved', 'Paid', 'Reversed'].includes(String(current?.status || ''))) throw new Error('Governed payment certificates are immutable; use settlement or reversal.');
           return dataRepository.update<Record<string, any>>('payment_certificates', id, patch);
+        } : tableName === 'labor_timesheets' ? async (id, patch) => {
+          const current = (data.laborTimesheets || []).find((row: any) => row.id === id) as any;
+          if (patch.status === 'Submitted' && current?.status === 'Draft') {
+            if ("__TAURI_INTERNALS__" in window) {
+              await submitLaborTimesheet({ operationId: crypto.randomUUID(), timesheetId: id, actor: sessionUser?.username || 'Local User', submittedAt: patch.submitted_at || new Date().toISOString().slice(0, 10) });
+              const rows = await dataRepository.list<Record<string, any>>('labor_timesheets');
+              return rows.find((row) => row.id === id) || current;
+            }
+          }
+          if (patch.status === 'Approved' && (current?.status === 'Submitted' || current?.status === 'Draft')) {
+            if ("__TAURI_INTERNALS__" in window) {
+              await approveLaborTimesheet({ operationId: crypto.randomUUID(), timesheetId: id, actor: sessionUser?.username || 'Local User', approvedAt: patch.approved_at || new Date().toISOString().slice(0, 10) });
+              const rows = await dataRepository.list<Record<string, any>>('labor_timesheets');
+              return rows.find((row) => row.id === id) || current;
+            }
+          }
+          if (patch.status === 'Posted' && current?.status === 'Approved') {
+            if ("__TAURI_INTERNALS__" in window) {
+              await postLaborTimesheet({ operationId: crypto.randomUUID(), timesheetId: id, actor: sessionUser?.username || 'Local User', postedAt: patch.posted_at || new Date().toISOString().slice(0, 10) });
+              const rows = await dataRepository.list<Record<string, any>>('labor_timesheets');
+              return rows.find((row) => row.id === id) || current;
+            }
+          }
+          if (patch.status === 'Reversed' && current?.status === 'Posted') {
+            if ("__TAURI_INTERNALS__" in window) {
+              await reverseLaborTimesheet({ operationId: crypto.randomUUID(), timesheetId: id, actor: sessionUser?.username || 'Local User', reason: patch.reversal_reason || 'Manual Reversal', reversedAt: patch.reversed_at || new Date().toISOString().slice(0, 10) });
+              const rows = await dataRepository.list<Record<string, any>>('labor_timesheets');
+              return rows.find((row) => row.id === id) || current;
+            }
+          }
+          if (['Approved', 'Posted', 'Reversed'].includes(String(current?.status || ''))) throw new Error('Governed labor timesheets are immutable; use approval, posting, or reversal.');
+          return dataRepository.update<Record<string, any>>('labor_timesheets', id, patch);
         } : tableName === 'supplier_invoice_lines' ? async (id, patch) => {
           const current = data.supplierInvoiceLines.find((row: any) => row.id === id) as any;
           const invoice = data.supplierInvoices.find((row: any) => row.id === current?.supplier_invoice_id) as any;
@@ -4443,7 +4478,7 @@ function AppWorkspace() {
           contract_role: 'Main Contract',
           ...createCodeDraft('contracts', data.contracts as Record<string, any>[]),
           ...createCodeDraft('projects', data.projects as Record<string, any>[]),
-        }) : tableName === 'procurement' || tableName === 'procurement_receipts' ? () => ({ status: 'Draft' }) : undefined}
+        }) : tableName === 'procurement' || tableName === 'procurement_receipts' || tableName === 'labor_timesheets' ? () => ({ status: 'Draft' }) : undefined}
       />
       <ScheduleVersionModal
         isOpen={tableName === 'schedule' && scheduleVersionOpen}
@@ -4543,6 +4578,45 @@ function AppWorkspace() {
         onClose={() => setCostVarianceDrillDownOpen(false)}
         selectedProjectId={workspaceProjectId || undefined}
         onSaved={async () => {
+          await data.reload();
+        }}
+      />
+      <LaborTimesheetModal
+        isOpen={laborTimesheetModalOpen}
+        onClose={() => {
+          setLaborTimesheetModalOpen(false);
+          setSelectedLaborTimesheet(null);
+        }}
+        timesheet={selectedLaborTimesheet}
+        existingLines={data.laborTimesheetLines || []}
+        projects={data.projects}
+        contracts={data.contracts}
+        controlAccounts={data.controlAccounts}
+        schedules={data.schedules}
+        resourceMasters={data.resourceMasters || []}
+        reportingPeriods={data.reportingPeriods || []}
+        workCalendars={data.workCalendars || []}
+        costCodes={data.costCodes || []}
+        allTimesheets={data.laborTimesheets || []}
+        allTimesheetLines={data.laborTimesheetLines || []}
+        dataDate={unifiedDataDate}
+        currentUser={sessionUser?.username || 'Site Engineer'}
+        onSaveDraft={async (ts, lines) => {
+          if (ts.id && (data.laborTimesheets || []).some((t: any) => t.id === ts.id)) {
+            await dataRepository.update<Record<string, any>>('labor_timesheets', ts.id, ts);
+          } else {
+            await dataRepository.insert<Record<string, any>>('labor_timesheets', ts as any);
+          }
+          for (const line of lines) {
+            if (line.id && (data.laborTimesheetLines || []).some((l: any) => l.id === line.id)) {
+              await dataRepository.update<Record<string, any>>('labor_timesheet_lines', line.id, line);
+            } else {
+              await dataRepository.insert<Record<string, any>>('labor_timesheet_lines', line as any);
+            }
+          }
+          await data.reload();
+        }}
+        onRefresh={async () => {
           await data.reload();
         }}
       />

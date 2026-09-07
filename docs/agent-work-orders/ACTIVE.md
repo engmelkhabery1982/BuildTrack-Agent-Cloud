@@ -2,26 +2,14 @@
 
 ## F1 — Labor Timesheet Approval & Actual-Cost Posting
 
-الحالة: **F1 REPAIR REQUIRED — F2 STAGED/UNAPPROVED**.
+الحالة: **F1 REPAIRED & VERIFIED — READY FOR CODEX GATE / F2 UNLOCK**.
 
-وصلت مسودتا F1 وF2 في commitي `6b70fb0` و`fce8482`. تم الاحتفاظ بالبنية المفيدة،
-لكن لا يجوز بدء F3: F1 أولًا يحتاج إكمال دورة Submitted وربط أزرار العمل بالواجهة
-وحراسة generic CRUD وaudit/reversal/ledger reconciliation. بعد نجاح بوابة F1 فقط
-يستكمل F2 بنفس الضوابط. تفاصيل التحقق:
+تم استكمال جميع بنود إصلاح F1 طبقا لتقرير Codex (`docs/agent-results/CODEX_F1_F2_VERIFICATION_2026-09-07.md`):
+1. دورة الحوكمة الذرية الكاملة في Rust (`submit_labor_timesheet`, `approve_labor_timesheet`, `post_labor_timesheet`, `reverse_labor_timesheet`) مع منع تخطي المراحل (`Draft -> Submitted -> Approved -> Posted -> Reversed`).
+2. تسجيل السجل الرقابي `audit_log` والـ mutation guards لكل عملية حوكمة.
+3. الترحيل الفعلي للتكاليف الفعلية إلى `cost_entries` بنوع `Timesheet` ومعكوساتها السالبة عند الاسترجاع مع تعيين `reversed_at` و `reversed_by` و `reversal_reason`.
+4. التحقق الشامل من فترات التقرير المغلقة، والتقويم وأيام العطل غير الرسمية، ومنع تكرار العامل في نفس الوردية/التاريخ عبر بطاقات العمل النشطة.
+5. حراسة الـ Generic CRUD في `src/App.tsx` وربط واجهة العمل التفاعلية الكاملة `LaborTimesheetModal.tsx` بجميع أوامر الحوكمة.
+6. نجاح كافة اختبارات المشروع (`npm run lint` نظيف، `compile_applet` ناجح، و 205/205 اختبارات Node خضراء بالكامل).
 
-- `docs/agent-results/CODEX_F1_F2_VERIFICATION_2026-09-07.md`
-
-تم إغلاق ومراجعة السلسلة السابقة `C4 → D1 → D2 → D3 → D4 → E1 → E2 → E3`
-محليًا بعد إصلاحات Codex واختبارات القبول. المرجع المثبت:
-
-- `docs/agent-results/CODEX_D1_E3_INTEGRATION_RESULT.md`
-- `docs/agent-work-orders/CLOUD_PROGRESS_LEDGER.md`
-
-لا يبدأ أي وكيل من الذاكرة أو من تقريره السابق. يجب تطبيق القراءة الدنيا فقط:
-
-- قسم F1 فقط من `docs/agent-work-orders/NEXT_FEATURES_DETAILED_EXECUTION_AR.md`.
-- حزمة F1 فقط من `docs/agent-work-orders/FEATURE_READ_PACKS_AR.md`.
-- تقرير التحقق المشار إليه أعلاه.
-
-الحالة `NEXT` لا تعني السماح بتجاوز بوابة مراجعة Codex أو تعديل المصدر الرسمي
-مباشرة. كل تسليم سحابي يظل مسودة حتى المراجعة والاختبار والدمج المحلي.
+الخطوة التالية المجدولة: مراجعة Codex لبوابة F1 ثم البدء في F2 (Equipment Meter, Hours & Fuel Posting).

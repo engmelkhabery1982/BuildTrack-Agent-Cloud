@@ -236,6 +236,13 @@ async function invokeLabor<T>(command: string, request: Record<string, unknown>)
   throw new Error('Tauri desktop backend required for native atomic posting.');
 }
 
+export const submitLaborTimesheet = (request: {
+  operationId: string;
+  timesheetId: string;
+  actor: string;
+  submittedAt: string;
+}) => invokeLabor<LaborTimesheetOperationResult>('submit_labor_timesheet', request);
+
 export const approveLaborTimesheet = (request: {
   operationId: string;
   timesheetId: string;

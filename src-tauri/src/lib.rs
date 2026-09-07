@@ -125,6 +125,15 @@ async fn approve_estimate_version(app: tauri::AppHandle, request: estimate_versi
 }
 
 #[tauri::command]
+async fn submit_labor_timesheet(
+    app: tauri::AppHandle,
+    request: labor_timesheet::SubmitLaborTimesheetRequest,
+) -> Result<labor_timesheet::LaborTimesheetOperationResult, String> {
+    let path = app.path().app_config_dir().map_err(|error| error.to_string())?.join("buildtrack.db");
+    labor_timesheet::submit_labor_timesheet(&path, request).await
+}
+
+#[tauri::command]
 async fn approve_labor_timesheet(
     app: tauri::AppHandle,
     request: labor_timesheet::ApproveLaborTimesheetRequest,
@@ -2805,6 +2814,7 @@ pub fn run() {
             issue_report_version,
             approve_cost_plan_version,
             approve_estimate_version,
+            submit_labor_timesheet,
             approve_labor_timesheet,
             post_labor_timesheet,
             reverse_labor_timesheet,

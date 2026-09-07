@@ -24,6 +24,15 @@ export { approveCostChange, approveVariation, approvePaymentCertificate, settleP
 export { issueReportVersion } from "./reportVersioning";
 export { approveCostPlanVersion } from "./costPlanVersioning";
 export { approveEstimateVersion } from "./estimateVersioning";
+export {
+  calculateLaborLineTotal,
+  calculateLaborTimesheetTotals,
+  validateLaborTimesheet,
+  submitLaborTimesheet,
+  approveLaborTimesheet,
+  postLaborTimesheet,
+  reverseLaborTimesheet,
+} from "./laborTimesheet";
 export { CANONICAL_FIELDS, IMPORT_FIELD_ALIASES, STATUS_SETS, isCanonicalStatus } from "./dataDictionary";
 export {
   assertCodeCanBeLocked,
