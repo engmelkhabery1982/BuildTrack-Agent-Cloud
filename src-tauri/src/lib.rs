@@ -9,6 +9,7 @@ mod report_versioning;
 mod cost_plan_versioning;
 mod estimate_versioning;
 mod labor_timesheet;
+mod equipment_log;
 
 #[tauri::command]
 async fn commit_governed_import(
@@ -148,6 +149,33 @@ async fn reverse_labor_timesheet(
 ) -> Result<labor_timesheet::LaborTimesheetOperationResult, String> {
     let path = app.path().app_config_dir().map_err(|error| error.to_string())?.join("buildtrack.db");
     labor_timesheet::reverse_labor_timesheet(&path, request).await
+}
+
+#[tauri::command]
+async fn approve_equipment_log(
+    app: tauri::AppHandle,
+    request: equipment_log::ApproveEquipmentLogRequest,
+) -> Result<equipment_log::EquipmentLogOperationResult, String> {
+    let path = app.path().app_config_dir().map_err(|error| error.to_string())?.join("buildtrack.db");
+    equipment_log::approve_equipment_log(&path, request).await
+}
+
+#[tauri::command]
+async fn post_equipment_log(
+    app: tauri::AppHandle,
+    request: equipment_log::PostEquipmentLogRequest,
+) -> Result<equipment_log::EquipmentLogOperationResult, String> {
+    let path = app.path().app_config_dir().map_err(|error| error.to_string())?.join("buildtrack.db");
+    equipment_log::post_equipment_log(&path, request).await
+}
+
+#[tauri::command]
+async fn reverse_equipment_log(
+    app: tauri::AppHandle,
+    request: equipment_log::ReverseEquipmentLogRequest,
+) -> Result<equipment_log::EquipmentLogOperationResult, String> {
+    let path = app.path().app_config_dir().map_err(|error| error.to_string())?.join("buildtrack.db");
+    equipment_log::reverse_equipment_log(&path, request).await
 }
 
 #[tauri::command]
@@ -2684,6 +2712,66 @@ pub fn run() {
     "#,
             kind: tauri_plugin_sql::MigrationKind::Up,
         },
+        tauri_plugin_sql::Migration {
+            version: 62,
+            description: "add_governed_equipment_logs",
+            sql: r#"
+      CREATE TABLE IF NOT EXISTS equipment_logs (
+        id TEXT PRIMARY KEY,
+        created_at TEXT NOT NULL,
+        updated_at TEXT,
+        project_id TEXT NOT NULL,
+        contract_id TEXT NOT NULL,
+        log_number TEXT NOT NULL,
+        log_date TEXT NOT NULL,
+        shift TEXT NOT NULL,
+        resource_id TEXT NOT NULL,
+        schedule_activity_id TEXT NOT NULL,
+        control_account_id TEXT NOT NULL,
+        cost_code_id TEXT,
+        operator_name TEXT,
+        meter_start REAL NOT NULL DEFAULT 0,
+        meter_end REAL NOT NULL DEFAULT 0,
+        meter_hours REAL NOT NULL DEFAULT 0,
+        operating_hours REAL NOT NULL DEFAULT 0,
+        idle_hours REAL NOT NULL DEFAULT 0,
+        breakdown_hours REAL NOT NULL DEFAULT 0,
+        total_hours REAL NOT NULL DEFAULT 0,
+        hours_override_reason TEXT,
+        hourly_rate REAL NOT NULL DEFAULT 0,
+        equipment_cost REAL NOT NULL DEFAULT 0,
+        fuel_quantity REAL NOT NULL DEFAULT 0,
+        fuel_rate REAL NOT NULL DEFAULT 0,
+        fuel_cost REAL NOT NULL DEFAULT 0,
+        total_cost REAL NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'Draft',
+        approved_by TEXT,
+        approved_at TEXT,
+        posted_by TEXT,
+        posted_at TEXT,
+        reversed_by TEXT,
+        reversed_at TEXT,
+        reversal_reason TEXT,
+        notes TEXT,
+        payload TEXT NOT NULL,
+        FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE RESTRICT,
+        FOREIGN KEY (contract_id) REFERENCES contracts(id) ON DELETE RESTRICT,
+        FOREIGN KEY (resource_id) REFERENCES resource_masters(id) ON DELETE RESTRICT,
+        FOREIGN KEY (schedule_activity_id) REFERENCES schedules(id) ON DELETE RESTRICT,
+        FOREIGN KEY (control_account_id) REFERENCES control_accounts(id) ON DELETE RESTRICT
+      );
+      CREATE INDEX IF NOT EXISTS idx_equipment_logs_scope ON equipment_logs(project_id, contract_id, log_date);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_equipment_logs_number ON equipment_logs(project_id, contract_id, lower(log_number));
+      CREATE INDEX IF NOT EXISTS idx_equipment_logs_resource_date ON equipment_logs(resource_id, log_date);
+      CREATE INDEX IF NOT EXISTS idx_equipment_logs_ca ON equipment_logs(control_account_id);
+
+      CREATE TRIGGER IF NOT EXISTS equipment_log_locked_delete
+      BEFORE DELETE ON equipment_logs
+      WHEN OLD.status IN ('Approved', 'Posted', 'Reversed')
+      BEGIN SELECT RAISE(ABORT, 'Approved, Posted or Reversed equipment logs cannot be deleted.'); END;
+    "#,
+            kind: tauri_plugin_sql::MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()
@@ -2720,6 +2808,9 @@ pub fn run() {
             approve_labor_timesheet,
             post_labor_timesheet,
             reverse_labor_timesheet,
+            approve_equipment_log,
+            post_equipment_log,
+            reverse_equipment_log,
             save_excel_download,
             save_document_attachment,
             backup_local_database,

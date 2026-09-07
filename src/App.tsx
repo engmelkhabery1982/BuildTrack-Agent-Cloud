@@ -887,6 +887,47 @@ const EQUIPMENT_COLUMNS: ColumnDef[] = [
   { key: 'notes', label: 'Notes', type: 'text', editable: true },
 ];
 
+const EQUIPMENT_LOG_COLUMNS: ColumnDef[] = [
+  { key: 'contract_id', label: 'Contract Code', type: 'select', editable: true },
+  { key: 'log_number', label: 'Log # / Ticket', type: 'text', editable: true },
+  { key: 'log_date', label: 'Log Date', type: 'date', editable: true },
+  { key: 'shift', label: 'Shift', type: 'status', editable: true, options: ['Day', 'Night', 'Shift 1', 'Shift 2'] },
+  { key: 'resource_id', label: 'Equipment Resource', type: 'select', editable: true },
+  { key: 'schedule_activity_id', label: 'Schedule Activity', type: 'select', editable: true },
+  { key: 'control_account_id', label: 'Control Account', type: 'select', editable: true },
+  { key: 'operator_name', label: 'Operator Name', type: 'text', editable: true },
+  { key: 'meter_start', label: 'Meter Start', type: 'number', editable: true },
+  { key: 'meter_end', label: 'Meter End', type: 'number', editable: true },
+  { key: 'meter_hours', label: 'Meter Hours', type: 'number', editable: false },
+  { key: 'operating_hours', label: 'Operating (hrs)', type: 'number', editable: true },
+  { key: 'idle_hours', label: 'Idle / Standby (hrs)', type: 'number', editable: true },
+  { key: 'breakdown_hours', label: 'Breakdown (hrs)', type: 'number', editable: true },
+  { key: 'total_hours', label: 'Total Hours', type: 'number', editable: false },
+  { key: 'hours_override_reason', label: 'Override Reason', type: 'text', editable: true },
+  { key: 'hourly_rate', label: 'Hourly Rate', type: 'money', editable: true },
+  { key: 'equipment_cost', label: 'Equipment Cost', type: 'money', editable: false },
+  { key: 'fuel_quantity', label: 'Fuel Qty', type: 'number', editable: true },
+  { key: 'fuel_rate', label: 'Fuel Unit Rate', type: 'money', editable: true },
+  { key: 'fuel_cost', label: 'Fuel Cost', type: 'money', editable: false },
+  { key: 'total_cost', label: 'Total Cost', type: 'money', editable: false },
+  { key: 'status', label: 'Status', type: 'status', editable: false, options: ['Draft', 'Submitted', 'Approved', 'Posted', 'Reversed'] },
+  { key: 'notes', label: 'Notes', type: 'text', editable: true },
+];
+
+const LABOR_TIMESHEET_COLUMNS: ColumnDef[] = [
+  { key: 'contract_id', label: 'Contract Code', type: 'select', editable: true },
+  { key: 'timesheet_number', label: 'Timesheet #', type: 'text', editable: true },
+  { key: 'work_date', label: 'Work Date', type: 'date', editable: true },
+  { key: 'shift', label: 'Shift', type: 'status', editable: true, options: ['Day', 'Night', 'Shift 1', 'Shift 2'] },
+  { key: 'crew_name', label: 'Crew / Gang', type: 'text', editable: true },
+  { key: 'submitter', label: 'Submitter', type: 'text', editable: true },
+  { key: 'total_regular_hours', label: 'Regular Hours', type: 'number', editable: false },
+  { key: 'total_overtime_hours', label: 'Overtime Hours', type: 'number', editable: false },
+  { key: 'total_amount', label: 'Total Amount', type: 'money', editable: false },
+  { key: 'status', label: 'Status', type: 'status', editable: false, options: ['Draft', 'Submitted', 'Approved', 'Posted', 'Reversed'] },
+  { key: 'notes', label: 'Notes', type: 'text', editable: true },
+];
+
 const RESOURCE_MASTER_COLUMNS: ColumnDef[] = [
   { key: 'resource_code', label: 'Resource Code', type: 'text', editable: true },
   { key: 'resource_name', label: 'Resource Name', type: 'text', editable: true },
@@ -986,8 +1027,10 @@ const VIEW_CONFIGS: Record<string, { columns: ColumnDef[]; filters?: FilterDef[]
   documents: { columns: DOC_COLUMNS, filters: [{ key: 'status', label: 'Status', options: DOC_STATUSES }, { key: 'document_type', label: 'Type', options: DOC_TYPES }], showProjectFilter: true, dateRangeColumn: 'upload_date' },
   wir: { columns: WIR_COLUMNS, filters: [{ key: 'control_account_id', label: 'Control Account', options: [] }, { key: 'company_name', label: 'Contractor', options: [] }, { key: 'contract_role', label: 'Contract Role', options: ['Main Contract', 'Subcontract'] }, { key: 'result', label: 'Result', options: WIR_RESULTS }], showProjectFilter: true, dateRangeColumn: 'inspection_date' },
   laborDuty: { columns: LABOR_DUTY_COLUMNS, filters: [{ key: 'role', label: 'Role', options: ['Mason', 'Carpenter', 'Steel Fixer', 'Electrician', 'Plumber', 'Painter', 'Laborer', 'Welder', 'Operator', 'Foreman', 'Supervisor'] }], showProjectFilter: true, dateRangeColumn: 'date' },
+  laborTimesheets: { columns: LABOR_TIMESHEET_COLUMNS, filters: [{ key: 'status', label: 'Status', options: ['Draft', 'Submitted', 'Approved', 'Posted', 'Reversed'] }, { key: 'shift', label: 'Shift', options: ['Day', 'Night', 'Shift 1', 'Shift 2'] }], showProjectFilter: true, dateRangeColumn: 'work_date' },
   resourceMaster: { columns: RESOURCE_MASTER_COLUMNS, filters: [{ key: 'resource_type', label: 'Type', options: ['Labor', 'Equipment'] }, { key: 'status', label: 'Status', options: ['Active', 'Inactive'] }] },
   equipment: { columns: EQUIPMENT_COLUMNS, filters: [{ key: 'equipment_type', label: 'Type', options: ['Excavator', 'Crane', 'Bulldozer', 'Concrete Mixer', 'Dump Truck', 'Forklift', 'Generator', 'Welding Machine', 'Air Compressor', 'Scaffolding', 'Other'] }], showProjectFilter: true, dateRangeColumn: 'date' },
+  equipmentLogs: { columns: EQUIPMENT_LOG_COLUMNS, filters: [{ key: 'status', label: 'Status', options: ['Draft', 'Submitted', 'Approved', 'Posted', 'Reversed'] }, { key: 'shift', label: 'Shift', options: ['Day', 'Night', 'Shift 1', 'Shift 2'] }], showProjectFilter: true, dateRangeColumn: 'log_date' },
   tracking: { columns: TRACKING_COLUMNS, filters: [{ key: 'status', label: 'Status', options: [] }, { key: 'source_type', label: 'Source', options: [] }], showProjectFilter: true, dateRangeColumn: 'created_time' },
 };
 
@@ -1001,7 +1044,7 @@ const TABLE_NAMES: Record<string, string> = {
   cashflow: 'cash_flow', subinvoices: 'subcontractor_invoices', clientinvoices: 'client_invoices',
   clientInvoiceTracking: 'client_invoice_tracking', subcontractorInvoiceTracking: 'subcontractor_invoice_tracking',
   variations: 'variations', variationLines: 'variation_lines', documents: 'documents', wir: 'wir_entries',
-  laborDuty: 'labor_duty', resourceMaster: 'resource_masters', equipment: 'equipment', tracking: 'tracking_sheet',
+  laborDuty: 'labor_duty', laborTimesheets: 'labor_timesheets', resourceMaster: 'resource_masters', equipment: 'equipment', equipmentLogs: 'equipment_logs', tracking: 'tracking_sheet',
   parties: 'parties', partyContacts: 'party_contacts', rateHistory: 'rate_history',
 };
 
@@ -1015,7 +1058,7 @@ const VIEW_TITLES: Record<string, string> = {
   cashflow: 'Cash Flow', subinvoices: 'Subcontractor Invoices', clientinvoices: 'Client Invoices',
   clientInvoiceTracking: 'Client Invoice Tracking', subcontractorInvoiceTracking: 'Subcontractor Invoice Tracking',
   variations: 'Variations', variationLines: 'Variation Lines', documents: 'Documents', wir: 'Work Inspection Reports',
-  laborDuty: 'Labor Duty', resourceMaster: 'Resource Master', equipment: 'Equipment', tracking: 'Tracking Sheet',
+  laborDuty: 'Labor Duty', laborTimesheets: 'Labor Timesheets', resourceMaster: 'Resource Master', equipment: 'Equipment', equipmentLogs: 'Equipment Logs', tracking: 'Tracking Sheet',
   parties: 'Clients, Vendors & Subcontractors', partyContacts: 'Party Contacts', rateHistory: 'Rate History',
 };
 

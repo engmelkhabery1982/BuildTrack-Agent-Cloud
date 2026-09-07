@@ -14,6 +14,7 @@ export const STATUS_SETS = {
   delayEvent: ['Identified', 'Submitted', 'Approved', 'Rejected', 'Closed'],
   document: ['Draft', 'Under Review', 'Approved', 'Current', 'Superseded'],
   laborTimesheet: ['Draft', 'Submitted', 'Approved', 'Posted', 'Reversed'],
+  equipmentLog: ['Draft', 'Submitted', 'Approved', 'Posted', 'Reversed'],
 } as const;
 
 export const CANONICAL_FIELDS = {
@@ -28,6 +29,7 @@ export const CANONICAL_FIELDS = {
   commercial: ['variation_number', 'variation_id', 'invoice_number', 'approved_date', 'effective_date'],
   financial: ['budget', 'planned_value', 'earned_work_value', 'actual_cost', 'inflow', 'outflow', 'net'],
   laborTimesheet: ['timesheet_number', 'work_date', 'shift', 'crew_name', 'submitter', 'status', 'total_regular_hours', 'total_overtime_hours', 'total_amount'],
+  equipmentLog: ['log_number', 'log_date', 'shift', 'resource_id', 'operator_name', 'meter_start', 'meter_end', 'meter_hours', 'operating_hours', 'idle_hours', 'breakdown_hours', 'total_hours', 'hourly_rate', 'equipment_cost', 'fuel_quantity', 'fuel_rate', 'fuel_cost', 'total_cost', 'status'],
 } as const;
 
 export const IMPORT_FIELD_ALIASES: Record<string, string> = {

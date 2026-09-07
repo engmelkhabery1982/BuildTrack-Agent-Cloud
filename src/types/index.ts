@@ -659,6 +659,48 @@ export interface LaborDuty {
 
 export type LaborTimesheetStatus = 'Draft' | 'Submitted' | 'Approved' | 'Posted' | 'Reversed';
 
+export type EquipmentLogStatus = 'Draft' | 'Submitted' | 'Approved' | 'Posted' | 'Reversed';
+
+export interface EquipmentLog {
+  id: string;
+  created_at: string;
+  updated_at?: string | null;
+  project_id: string;
+  contract_id: string;
+  log_number: string;
+  log_date: string;
+  shift: 'Day' | 'Night' | 'Shift 1' | 'Shift 2' | string;
+  resource_id: string;
+  schedule_activity_id: string;
+  control_account_id: string;
+  cost_code_id?: string | null;
+  operator_name?: string | null;
+  meter_start: number;
+  meter_end: number;
+  meter_hours: number;
+  operating_hours: number;
+  idle_hours: number;
+  breakdown_hours: number;
+  total_hours: number;
+  hours_override_reason?: string | null;
+  hourly_rate: number;
+  equipment_cost: number;
+  fuel_quantity: number;
+  fuel_rate: number;
+  fuel_cost: number;
+  total_cost: number;
+  status: EquipmentLogStatus;
+  approved_by?: string | null;
+  approved_at?: string | null;
+  posted_by?: string | null;
+  posted_at?: string | null;
+  reversed_by?: string | null;
+  reversed_at?: string | null;
+  reversal_reason?: string | null;
+  notes?: string | null;
+  payload?: string;
+}
+
 export interface LaborTimesheet {
   id: string;
   created_at: string;
@@ -1378,7 +1420,9 @@ export type ViewKey =
   | 'resourceCapacity'
   | 'resourceAssignments'
   | 'laborDuty'
+  | 'laborTimesheets'
   | 'equipment'
+  | 'equipmentLogs'
   | 'tasks'
   | 'governance'
   | 'approvals'
