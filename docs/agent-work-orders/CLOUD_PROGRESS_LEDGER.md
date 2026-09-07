@@ -7,8 +7,8 @@
 
 - Official reviewed C2 feature commit: `4d04d8de92e8bfaf7ca845c81b0108b54284781e`
 - Agent-cloud C2 synchronization commit: `8d22f5295bb491ec5c31e70d8db2940ad4ae0090`
-- Current capability: `F1 — Labor Timesheet Approval & Actual-Cost Posting`
-- Status: `REPAIR REQUIRED — agent draft exists; not accepted; F2 is staged and must wait`
+- Current capability: `F3 — Claims / Potential Variation Order Workflow`
+- Status: `IN PROGRESS — provisional cloud execution; F1/F2 await Codex acceptance`
 - Last accepted capability: `E3 — Controlled Reproducible Report Pack (Codex-repaired, reviewed and gate-tested)`
 - Official repository: `engmelkhabery1982/Build-Track-PM-App-`
 - Writable agent repository only: `engmelkhabery1982/BuildTrack-Agent-Cloud`
@@ -70,6 +70,17 @@
   - Validation engine enforcing locked reporting periods, work calendar non-working day overrides, duplicate worker shifts, active worker status, and scope matching.
   - Quality verification: `npm run lint` clean (0 errors), `compile_applet` passed, 205/205 tests passed.
 - Exact next action: Codex review gate for F1, then proceed with F2 (Equipment Meter, Hours & Fuel Posting).
+
+## تحديث التسليم — F2 (Equipment Meter, Hours & Fuel Posting)
+
+- Agent commits through: `8ce034d`.
+- Status: `READY FOR CODEX REVIEW — not CLOSED and not rated 8/10`.
+- The UI/backend draft is preserved. The agent's self-declared completion is not an
+  acceptance decision; Codex must run transaction, lifecycle, audit, reopen and ledger
+  reconciliation gates before official integration.
+- Provisional next cloud feature: `F3 — Claims / Potential Variation Order Workflow`.
+- Any label describing F3 as subcontract progress/interims is incorrect and superseded
+  by the detailed F3 specification and its Read Pack.
 
 ## تحديث التسليم — E2
 
