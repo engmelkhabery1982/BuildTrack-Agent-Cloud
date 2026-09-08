@@ -40,6 +40,21 @@ export {
   postEquipmentLog,
   reverseEquipmentLog,
 } from "./equipmentLog";
+export {
+  calculateClaimTotals,
+  evaluateContractNoticePeriod,
+  validateClaim,
+  canTransitionClaimStatus,
+  convertClaimToVariationPayload,
+  reverseClaimConversion,
+  submitClaim,
+  assessClaim,
+  approveClaim,
+  rejectClaim,
+  reopenClaim,
+  convertClaimToVariation,
+  reverseClaimConversionBackend,
+} from "./claims";
 export { CANONICAL_FIELDS, IMPORT_FIELD_ALIASES, STATUS_SETS, isCanonicalStatus } from "./dataDictionary";
 export {
   assertCodeCanBeLocked,

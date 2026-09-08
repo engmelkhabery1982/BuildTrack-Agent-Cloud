@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { LayoutDashboard, Database, FolderKanban, SquareCheck as CheckSquare, DollarSign, Package, ShieldAlert, TrendingUp, CalendarClock, Signature as FileSignature, ClipboardList, Banknote, Receipt, FileText, GitBranch, FolderOpen, FileCheck as FileCheck2, Building2, Menu, ListOrdered, HardHat, Wrench, ClipboardCheck, Layers, Download, Bell, CircleAlert, BrainCircuit, Maximize2, Minimize2, ArrowLeft, ArrowRight, Users, Gauge, Sliders } from 'lucide-react';
 import { useData } from '@/hooks/useData';
-import { acceptProcurementReceipt, amendPurchaseOrder, approveCostChange, approveCostPlanVersion, approvePaymentCertificate, approvePurchaseOrder, approveSupplierInvoice, approveVariation, assertBaselineApproval, assertRecordPeriodIsOpen, assertReportingPeriodDefinition, cancelPurchaseOrder, compareBaselineActivities, compareBaselineActivityDetails, compareBaselineRevisions, createBaselineActivitySnapshot, createBaselineDistributionSnapshot, createCodeDraft, dataRepository, issueReportVersion, prepareCodeControlledInsert, reverseCommercialPosting, reverseSupplierApPosting, reverseVariation, settlePaymentCertificate, settleSupplierInvoicePayment, STATUS_SETS, summarizeBaselineSchedule, submitLaborTimesheet, approveLaborTimesheet, postLaborTimesheet, reverseLaborTimesheet, approveEquipmentLog, postEquipmentLog, reverseEquipmentLog } from '@/data';
+import { acceptProcurementReceipt, amendPurchaseOrder, approveCostChange, approveCostPlanVersion, approvePaymentCertificate, approvePurchaseOrder, approveSupplierInvoice, approveVariation, assertBaselineApproval, assertRecordPeriodIsOpen, assertReportingPeriodDefinition, cancelPurchaseOrder, compareBaselineActivities, compareBaselineActivityDetails, compareBaselineRevisions, createBaselineActivitySnapshot, createBaselineDistributionSnapshot, createCodeDraft, dataRepository, issueReportVersion, prepareCodeControlledInsert, reverseCommercialPosting, reverseSupplierApPosting, reverseVariation, settlePaymentCertificate, settleSupplierInvoicePayment, STATUS_SETS, summarizeBaselineSchedule, submitLaborTimesheet, approveLaborTimesheet, postLaborTimesheet, reverseLaborTimesheet, approveEquipmentLog, postEquipmentLog, reverseEquipmentLog, submitClaim, assessClaim, approveClaim, rejectClaim, reopenClaim, convertClaimToVariation, reverseClaimConversionBackend } from '@/data';
 import { Dashboard } from '@/components/Dashboard';
 import { DataTableView, type ColumnDef, type FilterDef, type SelectOption } from '@/components/DataTableView';
 import { ReportTemplateDesigner } from '@/components/ReportTemplateDesigner';
@@ -780,19 +780,19 @@ const INVOICE_TRACKING_COLUMNS: ColumnDef[] = [
   { key: 'notes', label: 'Notes', type: 'text', editable: true },
 ];
 
-const CLAIM_STATUSES = ['Draft', 'Submitted', 'Under Review', 'Assessed', 'Approved', 'Rejected', 'Converted to PVO'];
+const CLAIM_STATUSES = ['Draft', 'Notified', 'Submitted', 'Under Assessment', 'Assessed', 'Approved', 'Rejected', 'Converted'];
 const CLAIM_COLUMNS: ColumnDef[] = [
   { key: 'claim_number', label: 'Claim #', type: 'text', editable: true },
   { key: 'contract_id', label: 'Contract', type: 'select', editable: true },
   { key: 'title', label: 'Title', type: 'text', editable: true },
   { key: 'notice_date', label: 'Notice Date', type: 'date', editable: true },
   { key: 'event_date', label: 'Event Date', type: 'date', editable: true },
-  { key: 'claimed_amount', label: 'Claimed Amount', type: 'money', editable: true },
-  { key: 'claimed_delay_days', label: 'Claimed Delay', type: 'number', editable: true },
-  { key: 'assessed_amount', label: 'Assessed Amount', type: 'money', editable: true },
-  { key: 'assessed_delay_days', label: 'Assessed Delay', type: 'number', editable: true },
-  { key: 'approved_amount', label: 'Approved Amount', type: 'money', editable: true },
-  { key: 'approved_delay_days', label: 'Approved Delay', type: 'number', editable: true },
+  { key: 'claimed_cost_impact', label: 'Claimed Cost', type: 'money', editable: true },
+  { key: 'claimed_time_impact_days', label: 'Claimed Delay (d)', type: 'number', editable: true },
+  { key: 'assessed_cost_impact', label: 'Assessed Cost', type: 'money', editable: true },
+  { key: 'assessed_time_impact_days', label: 'Assessed Delay (d)', type: 'number', editable: true },
+  { key: 'approved_cost_impact', label: 'Approved Cost', type: 'money', editable: true },
+  { key: 'approved_time_impact_days', label: 'Approved Delay (d)', type: 'number', editable: true },
   { key: 'status', label: 'Status', type: 'status', editable: true, options: CLAIM_STATUSES },
 ];
 
@@ -4771,12 +4771,17 @@ function AppWorkspace() {
           setClaimModalOpen(false);
           setSelectedClaim(null);
         }}
-        claim={selectedClaim}
+        claim={selectedClaim ? { ...selectedClaim, lines: data.claimLines.filter((l: any) => l.claim_id === selectedClaim.id) } : null}
         projects={data.projects}
         contracts={data.contracts}
         boqHeaders={data.boqHeaders}
         boqItems={data.boqItems}
-        onSave={async (claimData, lines) => {
+        rfis={data.rfis}
+        delays={data.delayEvents}
+        documents={data.documents}
+        schedules={data.schedules}
+        currentUser={sessionUser?.username || 'Commercial Manager'}
+        onSaveDraft={async (claimData, lines) => {
           if (selectedClaim && selectedClaim.id) {
             await dataRepository.update('claims', selectedClaim.id, claimData);
             data.applyLocalMutation('claims', { type: 'update', row: { ...selectedClaim, ...claimData } });
@@ -4795,6 +4800,118 @@ function AppWorkspace() {
           }
           await data.reload();
         }}
+        onSubmitClaim={async (claimData, lines) => {
+          if (selectedClaim && selectedClaim.id) {
+            await dataRepository.update('claims', selectedClaim.id, claimData);
+            data.applyLocalMutation('claims', { type: 'update', row: { ...selectedClaim, ...claimData } });
+          } else {
+            const inserted = await dataRepository.insert('claims', claimData);
+            data.applyLocalMutation('claims', { type: 'insert', row: inserted });
+          }
+          for (const line of lines) {
+            if (line.id && data.claimLines.some((l: any) => l.id === line.id)) {
+              await dataRepository.update('claim_lines', line.id, line);
+              data.applyLocalMutation('claim_lines', { type: 'update', row: line });
+            } else {
+              const insertedLine = await dataRepository.insert('claim_lines', line);
+              data.applyLocalMutation('claim_lines', { type: 'insert', row: insertedLine });
+            }
+          }
+          try {
+            await submitClaim({
+              operationId: crypto.randomUUID(),
+              claimId: claimData.id,
+              actor: sessionUser?.username || 'Commercial Manager',
+              submittedAt: claimData.submitted_at || new Date().toISOString().slice(0, 10),
+            });
+          } catch {
+            // Browser local fallback
+          }
+          await data.reload();
+        }}
+        onAssessClaim={async (claimData, lines, notes) => {
+          for (const line of lines) {
+            if (line.id && data.claimLines.some((l: any) => l.id === line.id)) {
+              await dataRepository.update('claim_lines', line.id, line);
+              data.applyLocalMutation('claim_lines', { type: 'update', row: line });
+            } else {
+              const insertedLine = await dataRepository.insert('claim_lines', line);
+              data.applyLocalMutation('claim_lines', { type: 'insert', row: insertedLine });
+            }
+          }
+          try {
+            await assessClaim({
+              operationId: crypto.randomUUID(),
+              claimId: claimData.id,
+              actor: sessionUser?.username || 'Commercial Manager',
+              assessedAt: claimData.assessed_at || new Date().toISOString().slice(0, 10),
+              assessedCostImpact: claimData.assessed_cost_impact,
+              assessedTimeImpactDays: claimData.assessed_time_impact_days,
+              notes: notes || null,
+            });
+          } catch {
+            await dataRepository.update('claims', claimData.id, claimData);
+            data.applyLocalMutation('claims', { type: 'update', row: claimData });
+          }
+          await data.reload();
+        }}
+        onApproveClaim={async (claimData, lines, notes) => {
+          for (const line of lines) {
+            if (line.id && data.claimLines.some((l: any) => l.id === line.id)) {
+              await dataRepository.update('claim_lines', line.id, line);
+              data.applyLocalMutation('claim_lines', { type: 'update', row: line });
+            } else {
+              const insertedLine = await dataRepository.insert('claim_lines', line);
+              data.applyLocalMutation('claim_lines', { type: 'insert', row: insertedLine });
+            }
+          }
+          try {
+            await approveClaim({
+              operationId: crypto.randomUUID(),
+              claimId: claimData.id,
+              actor: sessionUser?.username || 'Commercial Director',
+              approvedAt: claimData.approved_at || new Date().toISOString().slice(0, 10),
+              approvedCostImpact: claimData.approved_cost_impact,
+              approvedTimeImpactDays: claimData.approved_time_impact_days,
+              notes: notes || null,
+            });
+          } catch {
+            await dataRepository.update('claims', claimData.id, claimData);
+            data.applyLocalMutation('claims', { type: 'update', row: claimData });
+          }
+          await data.reload();
+        }}
+        onRejectClaim={async (claimData, reason) => {
+          try {
+            await rejectClaim({
+              operationId: crypto.randomUUID(),
+              claimId: claimData.id,
+              actor: sessionUser?.username || 'Commercial Director',
+              reason,
+              rejectedAt: new Date().toISOString().slice(0, 10),
+            });
+          } catch {
+            await dataRepository.update('claims', claimData.id, claimData);
+            data.applyLocalMutation('claims', { type: 'update', row: claimData });
+          }
+          await data.reload();
+        }}
+        onReopenClaim={async (claimData, targetStatus, reason) => {
+          try {
+            await reopenClaim({
+              operationId: crypto.randomUUID(),
+              claimId: claimData.id,
+              actor: sessionUser?.username || 'Commercial Director',
+              targetStatus,
+              reason,
+              reopenedAt: new Date().toISOString().slice(0, 10),
+            });
+          } catch {
+            await dataRepository.update('claims', claimData.id, claimData);
+            data.applyLocalMutation('claims', { type: 'update', row: claimData });
+          }
+          await data.reload();
+        }}
         onConvertToVariation={async (variationPayload, linesPayload, updatedClaim) => {
           const varInserted = await dataRepository.insert('variations', variationPayload);
           data.applyLocalMutation('variations', { type: 'insert', row: varInserted });
@@ -4802,8 +4919,34 @@ function AppWorkspace() {
             const vlInserted = await dataRepository.insert('variation_lines', vl);
             data.applyLocalMutation('variation_lines', { type: 'insert', row: vlInserted });
           }
-          await dataRepository.update('claims', updatedClaim.id, updatedClaim);
-          data.applyLocalMutation('claims', { type: 'update', row: updatedClaim });
+          try {
+            await convertClaimToVariation({
+              operationId: crypto.randomUUID(),
+              claimId: updatedClaim.id,
+              actor: sessionUser?.username || 'Commercial Manager',
+              variationId: variationPayload.id,
+              variationNumber: variationPayload.variation_number,
+              convertedAt: new Date().toISOString().slice(0, 10),
+            });
+          } catch {
+            await dataRepository.update('claims', updatedClaim.id, updatedClaim);
+            data.applyLocalMutation('claims', { type: 'update', row: updatedClaim });
+          }
+          await data.reload();
+        }}
+        onReverseConversion={async (claimData, reason) => {
+          try {
+            await reverseClaimConversionBackend({
+              operationId: crypto.randomUUID(),
+              claimId: claimData.id,
+              actor: sessionUser?.username || 'Commercial Director',
+              reason,
+              reversedAt: new Date().toISOString().slice(0, 10),
+            });
+          } catch {
+            await dataRepository.update('claims', claimData.id, claimData);
+            data.applyLocalMutation('claims', { type: 'update', row: claimData });
+          }
           await data.reload();
         }}
       />

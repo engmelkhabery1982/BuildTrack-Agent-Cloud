@@ -10,6 +10,7 @@ mod cost_plan_versioning;
 mod estimate_versioning;
 mod labor_timesheet;
 mod equipment_log;
+mod claims_workflow;
 
 #[tauri::command]
 async fn commit_governed_import(
@@ -198,6 +199,69 @@ async fn reverse_equipment_log(
 ) -> Result<equipment_log::EquipmentLogOperationResult, String> {
     let path = app.path().app_config_dir().map_err(|error| error.to_string())?.join("buildtrack.db");
     equipment_log::reverse_equipment_log(&path, request).await
+}
+
+#[tauri::command]
+async fn submit_claim(
+    app: tauri::AppHandle,
+    request: claims_workflow::SubmitClaimRequest,
+) -> Result<claims_workflow::ClaimOperationResult, String> {
+    let path = app.path().app_config_dir().map_err(|error| error.to_string())?.join("buildtrack.db");
+    claims_workflow::submit_claim(&path, request).await
+}
+
+#[tauri::command]
+async fn assess_claim(
+    app: tauri::AppHandle,
+    request: claims_workflow::AssessClaimRequest,
+) -> Result<claims_workflow::ClaimOperationResult, String> {
+    let path = app.path().app_config_dir().map_err(|error| error.to_string())?.join("buildtrack.db");
+    claims_workflow::assess_claim(&path, request).await
+}
+
+#[tauri::command]
+async fn approve_claim(
+    app: tauri::AppHandle,
+    request: claims_workflow::ApproveClaimRequest,
+) -> Result<claims_workflow::ClaimOperationResult, String> {
+    let path = app.path().app_config_dir().map_err(|error| error.to_string())?.join("buildtrack.db");
+    claims_workflow::approve_claim(&path, request).await
+}
+
+#[tauri::command]
+async fn reject_claim(
+    app: tauri::AppHandle,
+    request: claims_workflow::RejectClaimRequest,
+) -> Result<claims_workflow::ClaimOperationResult, String> {
+    let path = app.path().app_config_dir().map_err(|error| error.to_string())?.join("buildtrack.db");
+    claims_workflow::reject_claim(&path, request).await
+}
+
+#[tauri::command]
+async fn reopen_claim(
+    app: tauri::AppHandle,
+    request: claims_workflow::ReopenClaimRequest,
+) -> Result<claims_workflow::ClaimOperationResult, String> {
+    let path = app.path().app_config_dir().map_err(|error| error.to_string())?.join("buildtrack.db");
+    claims_workflow::reopen_claim(&path, request).await
+}
+
+#[tauri::command]
+async fn convert_claim_to_variation(
+    app: tauri::AppHandle,
+    request: claims_workflow::ConvertClaimToVariationRequest,
+) -> Result<claims_workflow::ClaimOperationResult, String> {
+    let path = app.path().app_config_dir().map_err(|error| error.to_string())?.join("buildtrack.db");
+    claims_workflow::convert_claim_to_variation(&path, request).await
+}
+
+#[tauri::command]
+async fn reverse_claim_conversion(
+    app: tauri::AppHandle,
+    request: claims_workflow::ReverseClaimConversionRequest,
+) -> Result<claims_workflow::ClaimOperationResult, String> {
+    let path = app.path().app_config_dir().map_err(|error| error.to_string())?.join("buildtrack.db");
+    claims_workflow::reverse_claim_conversion(&path, request).await
 }
 
 #[tauri::command]
@@ -3184,6 +3248,62 @@ pub fn run() {
             "#,
             kind: tauri_plugin_sql::MigrationKind::Up,
         },
+        tauri_plugin_sql::Migration {
+            version: 74,
+            description: "govern_claims_workflow_entry_points",
+            sql: r#"
+            ALTER TABLE claims ADD COLUMN submitted_by TEXT;
+            ALTER TABLE claims ADD COLUMN submitted_at TEXT;
+            ALTER TABLE claims ADD COLUMN assessed_by TEXT;
+            ALTER TABLE claims ADD COLUMN assessed_at TEXT;
+            ALTER TABLE claims ADD COLUMN approved_by TEXT;
+            ALTER TABLE claims ADD COLUMN approved_at TEXT;
+            ALTER TABLE claims ADD COLUMN rejected_by TEXT;
+            ALTER TABLE claims ADD COLUMN rejected_at TEXT;
+            ALTER TABLE claims ADD COLUMN rejection_reason TEXT;
+            ALTER TABLE claims ADD COLUMN reopened_by TEXT;
+            ALTER TABLE claims ADD COLUMN reopened_at TEXT;
+            ALTER TABLE claims ADD COLUMN reopened_reason TEXT;
+            ALTER TABLE claims ADD COLUMN converted_at TEXT;
+
+            CREATE TABLE IF NOT EXISTS claims_mutation_guard (
+              operation_id TEXT PRIMARY KEY,
+              created_at TEXT NOT NULL
+            );
+
+            DROP TRIGGER IF EXISTS claims_converted_locked_delete;
+
+            CREATE TRIGGER IF NOT EXISTS claims_governed_insert_v2
+            BEFORE INSERT ON claims
+            WHEN NEW.status NOT IN ('Draft', 'Notified')
+              AND NOT EXISTS (SELECT 1 FROM claims_mutation_guard)
+            BEGIN SELECT RAISE(ABORT, 'Claim must be created as Draft or Notified.'); END;
+
+            CREATE TRIGGER IF NOT EXISTS claims_governed_update_v2
+            BEFORE UPDATE ON claims
+            WHEN (OLD.status IN ('Approved', 'Converted', 'Rejected') OR NEW.status IN ('Approved', 'Converted', 'Rejected'))
+              AND NOT EXISTS (SELECT 1 FROM claims_mutation_guard)
+            BEGIN SELECT RAISE(ABORT, 'Governed claim status changes must use a lifecycle command.'); END;
+
+            CREATE TRIGGER IF NOT EXISTS claims_governed_delete_v2
+            BEFORE DELETE ON claims
+            WHEN OLD.status NOT IN ('Draft', 'Notified')
+            BEGIN SELECT RAISE(ABORT, 'Submitted, assessed, approved, rejected or converted claims cannot be deleted.'); END;
+
+            CREATE TRIGGER IF NOT EXISTS claim_lines_governed_mutation_v2
+            BEFORE UPDATE ON claim_lines
+            WHEN COALESCE((SELECT status FROM claims WHERE id = OLD.claim_id), '') IN ('Approved', 'Converted', 'Rejected')
+              AND NOT EXISTS (SELECT 1 FROM claims_mutation_guard)
+            BEGIN SELECT RAISE(ABORT, 'Claim lines cannot be modified once the claim is approved, converted or rejected.'); END;
+
+            CREATE TRIGGER IF NOT EXISTS claim_lines_governed_delete_v2
+            BEFORE DELETE ON claim_lines
+            WHEN COALESCE((SELECT status FROM claims WHERE id = OLD.claim_id), '') IN ('Approved', 'Converted', 'Rejected')
+              AND NOT EXISTS (SELECT 1 FROM claims_mutation_guard)
+            BEGIN SELECT RAISE(ABORT, 'Claim lines cannot be deleted once the claim is approved, converted or rejected.'); END;
+            "#,
+            kind: tauri_plugin_sql::MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()
@@ -3225,6 +3345,13 @@ pub fn run() {
             approve_equipment_log,
             post_equipment_log,
             reverse_equipment_log,
+            submit_claim,
+            assess_claim,
+            approve_claim,
+            reject_claim,
+            reopen_claim,
+            convert_claim_to_variation,
+            reverse_claim_conversion,
             save_excel_download,
             save_document_attachment,
             backup_local_database,

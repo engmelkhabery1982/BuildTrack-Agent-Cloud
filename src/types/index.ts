@@ -917,6 +917,7 @@ export interface Variation {
   approved_date: string | null;
   notes: string;
   created_at: string;
+  source_claim_id?: string | null;
 }
 
 /** A controlled financial/quantity change within one variation order. */
@@ -942,6 +943,7 @@ export interface VariationLine {
   effective_date: string | null;
   notes: string;
   created_at: string;
+  source_claim_line_id?: string | null;
 }
 
 export interface DocumentEntry {
@@ -1919,6 +1921,8 @@ export interface EstimateVersion {
 
 export type ClaimStatus = 'Draft' | 'Notified' | 'Submitted' | 'Under Assessment' | 'Assessed' | 'Approved' | 'Rejected' | 'Converted';
 
+export type ClaimLineChangeType = 'New Item' | 'Quantity Change' | 'Rate Change' | 'Quantity & Rate Change' | 'Time Only' | 'Markup';
+
 export interface Claim {
   id: string;
   project_id: string;
@@ -1946,7 +1950,25 @@ export interface Claim {
   evidence_notes?: string | null;
   reversal_reason?: string | null;
   converted_variation_id?: string | null;
+  converted_at?: string | null;
+  submitted_by?: string | null;
+  submitted_at?: string | null;
+  assessed_by?: string | null;
+  assessed_at?: string | null;
+  approved_by?: string | null;
+  approved_at?: string | null;
+  rejected_by?: string | null;
+  rejected_at?: string | null;
+  rejection_reason?: string | null;
+  reopened_by?: string | null;
+  reopened_at?: string | null;
+  reopened_reason?: string | null;
+  notice_deadline?: string | null;
+  late_notice?: boolean;
+  requires_setup?: boolean;
   created_at: string;
+  updated_at?: string | null;
+  payload?: string;
 }
 
 export interface ClaimLine {
@@ -1955,13 +1977,19 @@ export interface ClaimLine {
   contract_id: string;
   item_code: string;
   description: string;
-  change_type: 'New Item' | 'Quantity Change' | 'Rate Change' | 'Quantity & Rate Change';
+  change_type: ClaimLineChangeType;
   claimed_value: number;
   assessed_value: number;
   approved_value: number;
+  claimed_days?: number | null;
+  assessed_days?: number | null;
+  approved_days?: number | null;
   boq_header_id?: string | null;
   boq_item_id?: string | null;
   value_impact?: number;
+  justification?: string | null;
+  notes?: string | null;
+  payload?: string;
 }
 
 export interface CashForecastVersion {
