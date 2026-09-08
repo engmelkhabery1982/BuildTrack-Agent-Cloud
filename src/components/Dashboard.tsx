@@ -22,7 +22,7 @@ import { buildBoqWasteLedger, buildOperationalScopeReport, calculateEarnedSchedu
 import type {
   Project, Task, Cost, CostEntry, Procurement, Safety, ProgressEntry, ProjectWithStats, ViewKey,
   Schedule, Contract, BOQHeader, BOQItem, ContractSOVLine, ControlAccount, ProcurementReceipt, CashFlowEntry, SubcontractorInvoice, ClientInvoice,
-  Variation, DocumentEntry, WIREntry, ProgressCorrection, ProjectBaseline, ReportingPeriod, GovernanceRegisterEntry, RFIEntry, SubmittalEntry, QualityEntry, CostPlanVersion,
+  Variation, DocumentEntry, WIREntry, ProgressCorrection, ProjectBaseline, ReportingPeriod, GovernanceRegisterEntry, RFIEntry, SubmittalEntry, QualityEntry, CostPlanVersion, PaymentCertificate, CashForecastVersion,
 } from '@/types';
 
 interface DashboardProps {
@@ -58,6 +58,8 @@ interface DashboardProps {
   resourceMasters: Record<string, any>[];
   scheduleResourceAssignments: Record<string, any>[];
   workCalendars: Record<string, any>[];
+  paymentCertificates?: PaymentCertificate[];
+  cashForecastVersions?: CashForecastVersion[];
   onNavigate: (view: ViewKey) => void;
   onDataReload?: () => Promise<void>;
 }
@@ -107,7 +109,7 @@ type DashboardTab = 'overview' | 'report' | 'financials' | 'schedule' | 'safety'
 
 export function Dashboard({
   projects, tasks, costs, costEntries, procurement, procurementReceipts, safety, progress, schedules, contracts,
-  boqHeaders, boqItems, contractSovLines, controlAccounts, costPlanVersions, cashFlow, subInvoices, clientInvoices, variations, documents, wirEntries, progressCorrections, baselines, reportingPeriods, governanceRegister, scheduleDistributions, rfis, submittals, quality, resourceMasters, scheduleResourceAssignments, workCalendars, onNavigate, onDataReload,
+  boqHeaders, boqItems, contractSovLines, controlAccounts, costPlanVersions, cashFlow, subInvoices, clientInvoices, variations, documents, wirEntries, progressCorrections, baselines, reportingPeriods, governanceRegister, scheduleDistributions, rfis, submittals, quality, resourceMasters, scheduleResourceAssignments, workCalendars, paymentCertificates = [], cashForecastVersions = [], onNavigate, onDataReload,
 }: DashboardProps) {
   const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
   const [searchQuery, setSearchQuery] = useState('');
@@ -1460,7 +1462,16 @@ export function Dashboard({
                   <p className="text-xs text-neutral-400">Monthly time-phased liquidity projection, planned vs. actual cash positions</p>
                 </div>
               </div>
-              <CashFlowForecastBoard data={cashFlowData} currency={projectCurrency || '$'} />
+              <CashFlowForecastBoard
+                projectId={selectedProjectId}
+                dataDate={asOfDate}
+                data={cashFlowData}
+                paymentCertificates={paymentCertificates}
+                cashFlowEntries={cashFlow}
+                procurementOrders={procurement}
+                versions={cashForecastVersions}
+                currency={projectCurrency || '$'}
+              />
             </div>
 
             {/* Invoices + Variations */}

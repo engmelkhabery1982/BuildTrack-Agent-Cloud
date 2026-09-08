@@ -529,10 +529,15 @@ export interface Contract {
   contract_number: string;
   contract_number_locked: boolean;
   title: string;
+  name?: string;
   project_name: string;
   contractor: string;
   contract_type: string;
   contract_value: number;
+  advance_amount?: number;
+  retention_cap_amount?: number;
+  retention_rate?: number;
+  tax_rate?: number;
   start_date: string | null;
   end_date: string | null;
   status: string;
@@ -670,6 +675,32 @@ export interface ClientInvoice {
   created_at: string;
 }
 
+/** Payment certificate line item capturing aggregated WIR inspection quantities and previous/current/cumulative reconciliation */
+export interface PaymentCertificateLine {
+  id: string;
+  certificate_id: string;
+  boq_item_id: string;
+  item_code?: string;
+  description?: string;
+  unit?: string;
+  source_wir_ids: string[];
+  source_wir_numbers?: string[];
+  wir_count?: number;
+  original_quantity?: number;
+  revised_quantity?: number;
+  previous_quantity: number;
+  current_quantity: number;
+  cumulative_quantity: number;
+  unit_rate: number;
+  previous_value?: number;
+  current_value: number;
+  cumulative_value: number;
+  control_account_id?: string | null;
+  back_to_back_status?: 'Authorized' | 'Pending' | 'Blocked' | 'N/A';
+  over_certified?: boolean;
+  over_certified_quantity?: number;
+}
+
 /** Approved commercial certificate: the controlled payment summary for one contract. */
 export interface PaymentCertificate {
   id: string;
@@ -685,12 +716,24 @@ export interface PaymentCertificate {
   certificate_date: string | null;
   gross_certified_value: number;
   retention_rate: number;
+  retention_amount?: number;
+  cumulative_retention_amount?: number;
   advance_recovery: number;
+  remaining_advance_balance?: number;
   deductions: number;
   tax_rate: number;
-  status: 'Draft' | 'Submitted' | 'Approved' | 'Rejected' | 'Paid' | string;
+  taxable_amount?: number;
+  tax_amount?: number;
+  net_certified_value?: number;
+  paid_amount?: number;
+  balance_due?: number;
+  paid_by?: string | null;
+  lines?: PaymentCertificateLine[];
+  status: 'Draft' | 'Submitted' | 'Approved' | 'Rejected' | 'Partially Paid' | 'Paid' | 'Reversed' | string;
   approved_by: string;
   approved_date: string | null;
+  reversed_by?: string | null;
+  reversal_reason?: string | null;
   /** Back-to-Back (PWP) flag for subcontract settlements */
   pwp_unlocked?: boolean;
   unlocked_for_subcontractors?: boolean;
@@ -1999,7 +2042,10 @@ export interface CashForecastVersion {
   contract_id?: string | null;
   version_code: string;
   title: string;
-  status: 'Draft' | 'Approved' | 'Archived';
+  revision_number?: number;
+  data_date?: string | null;
+  reason?: string | null;
+  status: 'Draft' | 'Approved' | 'Superseded' | 'Archived';
   client_payment_lag_days: number;
   subcontractor_payment_lag_days: number;
   retention_release_toc_percent: number;
@@ -2009,6 +2055,30 @@ export interface CashForecastVersion {
   contingency_drawdown_percent: number;
   notes?: string | null;
   created_by: string;
+  approved_at?: string | null;
+  approved_by?: string | null;
+  payload?: string;
+}
+
+export interface CashForecastAssumptionLine {
+  id: string;
+  forecast_version_id: string;
+  project_id: string;
+  contract_id?: string | null;
+  source_type: 'ClientCertificate' | 'SubcontractInvoice' | 'SupplierInvoice' | 'PurchaseOrder' | 'ApprovedVariation' | 'ManualCashMovement';
+  source_id: string;
+  description: string;
+  base_date: string;
+  period: string;
+  payment_terms_days: number;
+  lag_days: number;
+  probability_percent: number;
+  date_override?: string | null;
+  override_reason?: string | null;
+  gross_amount: number;
+  net_amount: number;
+  direction: 'Inflow' | 'Outflow';
+  is_settled: boolean;
 }
 
 export type HealthDimensionKey = 'Schedule' | 'Cost' | 'Cash' | 'Scope' | 'Quality' | 'Data Quality';

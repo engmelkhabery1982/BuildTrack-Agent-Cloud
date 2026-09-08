@@ -5,7 +5,7 @@ import type {
   Schedule, Contract, BOQHeader, BOQItem, CashFlowEntry, SubcontractorInvoice,
   ClientInvoice, PaymentCertificate, Variation, VariationLine, DocumentEntry, WIREntry, LaborDuty, Equipment, TrackingSheet, ResourceMaster,
   InvoiceTracking, ScheduleDistribution, ScheduleResourceAssignment, ScheduleVersion, ProjectBaseline, ReportingPeriod, GovernanceRegisterEntry, ApprovalRequest, AuditLogEntry, RFIEntry, SubmittalEntry, QualityEntry, SiteDailyReport, PMOSnapshot, AppUser, Party, PartyContact, RateHistory, ReportTemplate, Attachment, DqRule, DqExecutionLog, ReportVersion, CostCode, WBSNode, ContractSOVLine, ControlAccount, CostChange, WorkCalendar, ProgressCorrection, DelayEvent, CostPlanVersion, EstimateVersion, VarianceActionItem,
-  LaborTimesheet, LaborTimesheetLine, EquipmentLog, Claim, ClaimLine,
+  LaborTimesheet, LaborTimesheetLine, EquipmentLog, Claim, ClaimLine, CashForecastVersion,
 } from '@/types';
 import { syncWirApprovalProgress, evaluateBackToBackPaymentAuthorization } from '@/utils/commercialControl';
 
@@ -83,6 +83,7 @@ export function useData() {
   const [equipmentLogs, setEquipmentLogs] = useState<EquipmentLog[]>([]);
   const [claims, setClaims] = useState<Claim[]>([]);
   const [claimLines, setClaimLines] = useState<ClaimLine[]>([]);
+  const [cashForecastVersions, setCashForecastVersions] = useState<CashForecastVersion[]>([]);
   const [loading, setLoading] = useState(true);
 
   const listOptional = useCallback(async <T,>(tableName: string): Promise<T[]> => {
@@ -100,7 +101,7 @@ export function useData() {
 
     try {
       const [
-        p, t, c, ce, pr, prec, supi, supil, supip, s, pg, sc, sd, sra, wc, sv, de, bl, rp, gr, ap, al, rf, su, qu, sdr, sn, us, ct, bh, bq, cf, si, ci, cit, sit, va, vl, dc, wr, pcor, ld, eq, rm, tr, pa, pc, rh, rt, att, dqr, dqel, rver, cc, wn, sov, ca, cpv, ev, cchg, pcert, vacts, lts, ltsl, eql, clm, clml,
+        p, t, c, ce, pr, prec, supi, supil, supip, s, pg, sc, sd, sra, wc, sv, de, bl, rp, gr, ap, al, rf, su, qu, sdr, sn, us, ct, bh, bq, cf, si, ci, cit, sit, va, vl, dc, wr, pcor, ld, eq, rm, tr, pa, pc, rh, rt, att, dqr, dqel, rver, cc, wn, sov, ca, cpv, ev, cchg, pcert, vacts, lts, ltsl, eql, clm, clml, cfv,
       ] = await Promise.all([
         dataRepository.list<Project>('projects'),
         dataRepository.list<Task>('tasks'),
@@ -154,6 +155,7 @@ export function useData() {
         listOptional<LaborTimesheet>('labor_timesheets'), listOptional<LaborTimesheetLine>('labor_timesheet_lines'),
         listOptional<EquipmentLog>('equipment_logs'),
         listOptional<Claim>('claims'), listOptional<ClaimLine>('claim_lines'),
+        listOptional<CashForecastVersion>('cash_forecast_versions'),
       ]);
 
       setProjects(p);
@@ -214,6 +216,7 @@ export function useData() {
       setEquipmentLogs(eql || []);
       setClaims(clm || []);
       setClaimLines(clml || []);
+      setCashForecastVersions(cfv || []);
     } finally {
       if (showLoading) setLoading(false);
     }
@@ -386,6 +389,7 @@ export function useData() {
       case 'equipment_logs': apply(setEquipmentLogs); break;
       case 'claims': apply(setClaims); break;
       case 'claim_lines': apply(setClaimLines); break;
+      case 'cash_forecast_versions': apply(setCashForecastVersions); break;
       case 'payment_certificates': {
         apply(setPaymentCertificates);
         if (mutation.type === 'insert' || mutation.type === 'update') {
@@ -408,7 +412,7 @@ export function useData() {
     projects, tasks, costs, costEntries, procurement, procurementReceipts, supplierInvoices, supplierInvoiceLines, supplierInvoicePayments, safety, progress, schedules, scheduleDistributions, scheduleResourceAssignments, workCalendars, scheduleVersions, delayEvents, baselines, reportingPeriods, governanceRegister, approvals, auditLog, rfis, submittals, quality, siteDailyReports, snapshots, users,
     contracts, boqHeaders, boqItems, cashFlow, subInvoices, clientInvoices,
     clientInvoiceTracking, subcontractorInvoiceTracking, variations, variationLines,
-    documents, wirEntries, progressCorrections, laborDuty, equipment, resourceMasters, tracking, parties, partyContacts, rateHistory, reportTemplates, attachments, dqRules, dqExecutionLogs, reportVersions, costCodes, wbsNodes, contractSovLines, controlAccounts, costPlanVersions, estimateVersions, costChanges, paymentCertificates, varianceActions, laborTimesheets, laborTimesheetLines, equipmentLogs, claims, claimLines, loading,
+    documents, wirEntries, progressCorrections, laborDuty, equipment, resourceMasters, tracking, parties, partyContacts, rateHistory, reportTemplates, attachments, dqRules, dqExecutionLogs, reportVersions, costCodes, wbsNodes, contractSovLines, controlAccounts, costPlanVersions, estimateVersions, costChanges, paymentCertificates, varianceActions, laborTimesheets, laborTimesheetLines, equipmentLogs, claims, claimLines, cashForecastVersions, loading,
     reload: loadAll, applyLocalMutation, reloadInvoiceTracking, syncWirApproval, unlockBackToBackPayments,
   };
 }

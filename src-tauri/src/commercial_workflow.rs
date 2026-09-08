@@ -10,7 +10,7 @@ use std::path::Path;
 pub struct ApprovalRequest { pub operation_id: String, pub source_id: String, pub actor: String, pub approved_at: String }
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CertificateSettlementRequest { pub operation_id: String, pub certificate_id: String, pub actor: String, pub paid_at: String }
+pub struct CertificateSettlementRequest { pub operation_id: String, pub certificate_id: String, pub actor: String, pub paid_at: String, #[serde(default)] pub payment_amount: Option<f64> }
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReversalRequest { pub operation_id: String, pub source_table: String, pub source_id: String, pub actor: String, pub reason: String }
@@ -184,8 +184,38 @@ pub async fn approve_payment_certificate(path:&Path,r:ApprovalRequest)->std::res
  }.await;
  match outcome{Ok(())=>{guard(&mut tx,&r.operation_id,false).await?;tx.commit().await.map_err(|e|e.to_string())?;Ok(Result{operation_id:r.operation_id,status:"Posted".into()})},Err(e)=>{tx.rollback().await.map_err(|x|x.to_string())?;Err(e)}}
 }
-pub async fn settle_payment_certificate(path:&Path,r:CertificateSettlementRequest)->std::result::Result<Result,String>{if r.operation_id.trim().is_empty()||r.actor.trim().is_empty()||r.paid_at.trim().is_empty(){return Err("Certificate settlement requires operation ID, actor and payment date.".into())}let mut tx=db(path).await?.begin().await.map_err(|e|e.to_string())?;guard(&mut tx,&r.operation_id,true).await?;let outcome=async{let(scope,mut v)=scope_doc(&mut tx,"payment_certificates",&r.certificate_id).await?;if s(&v,"status")!="Approved"{return Err("Only an approved payment certificate can be settled.".into())}let net=n(&v,"net_certified_value");if net<=0.0{return Err("Approved certificate has no governed net value.".into())}let client=s(&v,"certificate_type")=="Client";let o=v.as_object_mut().ok_or("Invalid certificate payload.")?;o.insert("status".into(),json!("Paid"));o.insert("payment_date".into(),json!(r.paid_at));o.insert("paid_by".into(),json!(r.actor));put(&mut tx,"payment_certificates",&r.certificate_id,&v).await?;synchronize_invoice_tracking(&mut tx,&v,Some(&r.paid_at),false).await?;cash(&mut tx,&scope,&r.certificate_id,&r.paid_at,&s(&v,"certificate_number"),"Actual","Settled",net,client).await?;post(&mut tx,&r.operation_id,"payment_certificates",&r.certificate_id,"PaymentCertificateSettlement",&r.actor,&r.paid_at,"Settled payment certificate",&v).await}.await;match outcome{Ok(())=>{guard(&mut tx,&r.operation_id,false).await?;tx.commit().await.map_err(|e|e.to_string())?;Ok(Result{operation_id:r.operation_id,status:"Posted".into()})},Err(e)=>{tx.rollback().await.map_err(|x|x.to_string())?;Err(e)}}}
-pub async fn reverse_commercial_posting(path:&Path,r:ReversalRequest)->std::result::Result<Result,String>{if !matches!(r.source_table.as_str(),"cost_changes"|"payment_certificates")||r.operation_id.trim().is_empty()||r.actor.trim().is_empty()||r.reason.trim().is_empty(){return Err("Commercial reversal requires source, operation ID, actor and reason.".into())}let mut tx=db(path).await?.begin().await.map_err(|e|e.to_string())?;guard(&mut tx,&r.operation_id,true).await?;let outcome=async{let(scope,mut v)=scope_doc(&mut tx,&r.source_table,&r.source_id).await?;if !matches!(s(&v,"status").as_str(),"Approved"|"Paid"){return Err("Only an approved or paid commercial document can be reversed.".into())}let snapshot=v.clone();let sov=s(&v,"contract_sov_line_id");let o=v.as_object_mut().ok_or("Invalid commercial payload.")?;o.insert("status".into(),json!("Reversed"));o.insert("reversed_by".into(),json!(r.actor));o.insert("reversal_reason".into(),json!(r.reason));put(&mut tx,&r.source_table,&r.source_id,&v).await?;if r.source_table=="payment_certificates"{synchronize_invoice_tracking(&mut tx,&v,None,true).await?;cash(&mut tx,&scope,&r.source_id,"",&s(&v,"certificate_number"),"Reversed","Reversed",0.0,false).await?;}else{recompute_sov(&mut tx,&sov).await?;}post(&mut tx,&r.operation_id,&r.source_table,&r.source_id,"CommercialReversal",&r.actor,&stamp(),&r.reason,&snapshot).await}.await;match outcome{Ok(())=>{guard(&mut tx,&r.operation_id,false).await?;tx.commit().await.map_err(|e|e.to_string())?;Ok(Result{operation_id:r.operation_id,status:"Posted".into()})},Err(e)=>{tx.rollback().await.map_err(|x|x.to_string())?;Err(e)}}}
+pub async fn settle_payment_certificate(path:&Path,r:CertificateSettlementRequest)->std::result::Result<Result,String>{
+ if r.operation_id.trim().is_empty()||r.actor.trim().is_empty()||r.paid_at.trim().is_empty(){return Err("Certificate settlement requires operation ID, actor and payment date.".into())}
+ let mut tx=db(path).await?.begin().await.map_err(|e|e.to_string())?;guard(&mut tx,&r.operation_id,true).await?;
+ let outcome=async{
+  let(scope,mut v)=scope_doc(&mut tx,"payment_certificates",&r.certificate_id).await?;
+  let current_status=s(&v,"status");
+  if !matches!(current_status.as_str(),"Approved"|"Partially Paid"){return Err("Only an approved or partially paid payment certificate can be settled.".into())}
+  let net=n(&v,"net_certified_value");
+  if net<=0.0{return Err("Approved certificate has no governed net value.".into())}
+  let prior_paid=n(&v,"paid_amount");
+  let settle_amount=match r.payment_amount{Some(amt) if amt>0.0=>money(amt),_=>money(net-prior_paid)};
+  if settle_amount<=0.0{return Err("Payment amount must be greater than zero.".into())}
+  let total_paid=money(prior_paid+settle_amount);
+  if total_paid>net+0.000001{return Err("Cumulative payment cannot exceed the net certified value.".into())}
+  let is_fully_paid=total_paid>=net-0.000001;
+  let next_status=if is_fully_paid{"Paid"}else{"Partially Paid"};
+  let client=s(&v,"certificate_type")=="Client";
+  let o=v.as_object_mut().ok_or("Invalid certificate payload.")?;
+  o.insert("status".into(),json!(next_status));
+  o.insert("payment_date".into(),json!(r.paid_at));
+  o.insert("paid_by".into(),json!(r.actor));
+  o.insert("paid_amount".into(),json!(total_paid));
+  o.insert("balance_due".into(),json!(money((net-total_paid).max(0.0))));
+  put(&mut tx,"payment_certificates",&r.certificate_id,&v).await?;
+  let tracking_status=if is_fully_paid{Some(r.paid_at.as_str())}else{None};
+  synchronize_invoice_tracking(&mut tx,&v,tracking_status,false).await?;
+  cash(&mut tx,&scope,&r.certificate_id,&r.paid_at,&s(&v,"certificate_number"),"Actual",if is_fully_paid{"Settled"}else{"Partially Settled"},total_paid,client).await?;
+  post(&mut tx,&r.operation_id,"payment_certificates",&r.certificate_id,"PaymentCertificateSettlement",&r.actor,&r.paid_at,"Settled payment certificate",&v).await
+ }.await;
+ match outcome{Ok(())=>{guard(&mut tx,&r.operation_id,false).await?;tx.commit().await.map_err(|e|e.to_string())?;Ok(Result{operation_id:r.operation_id,status:"Posted".into()})},Err(e)=>{tx.rollback().await.map_err(|x|x.to_string())?;Err(e)}}
+}
+pub async fn reverse_commercial_posting(path:&Path,r:ReversalRequest)->std::result::Result<Result,String>{if !matches!(r.source_table.as_str(),"cost_changes"|"payment_certificates")||r.operation_id.trim().is_empty()||r.actor.trim().is_empty()||r.reason.trim().is_empty(){return Err("Commercial reversal requires source, operation ID, actor and reason.".into())}let mut tx=db(path).await?.begin().await.map_err(|e|e.to_string())?;guard(&mut tx,&r.operation_id,true).await?;let outcome=async{let(scope,mut v)=scope_doc(&mut tx,&r.source_table,&r.source_id).await?;if !matches!(s(&v,"status").as_str(),"Approved"|"Partially Paid"|"Paid"){return Err("Only an approved, partially paid or paid commercial document can be reversed.".into())}let snapshot=v.clone();let sov=s(&v,"contract_sov_line_id");let o=v.as_object_mut().ok_or("Invalid commercial payload.")?;o.insert("status".into(),json!("Reversed"));o.insert("reversed_by".into(),json!(r.actor));o.insert("reversal_reason".into(),json!(r.reason));put(&mut tx,&r.source_table,&r.source_id,&v).await?;if r.source_table=="payment_certificates"{synchronize_invoice_tracking(&mut tx,&v,None,true).await?;cash(&mut tx,&scope,&r.source_id,"",&s(&v,"certificate_number"),"Reversed","Reversed",0.0,false).await?;}else{recompute_sov(&mut tx,&sov).await?;}post(&mut tx,&r.operation_id,&r.source_table,&r.source_id,"CommercialReversal",&r.actor,&stamp(),&r.reason,&snapshot).await}.await;match outcome{Ok(())=>{guard(&mut tx,&r.operation_id,false).await?;tx.commit().await.map_err(|e|e.to_string())?;Ok(Result{operation_id:r.operation_id,status:"Posted".into()})},Err(e)=>{tx.rollback().await.map_err(|x|x.to_string())?;Err(e)}}}
 
 pub async fn reverse_variation(path:&Path,r:ReversalRequest)->std::result::Result<Result,String>{
  if r.operation_id.trim().is_empty()||r.actor.trim().is_empty()||r.reason.trim().is_empty(){return Err("Variation reversal requires operation ID, actor and reason.".into())}
@@ -221,7 +251,7 @@ mod tests {
  "CREATE TABLE audit_log(id TEXT PRIMARY KEY,created_at TEXT,project_id TEXT,contract_id TEXT,payload TEXT)",
  "CREATE TABLE commercial_workflow_postings(id TEXT PRIMARY KEY,created_at TEXT,source_table TEXT,source_id TEXT,posting_type TEXT,status TEXT,actor TEXT,effective_date TEXT,reason TEXT,snapshot_json TEXT,UNIQUE(source_table,source_id,posting_type))",
   "CREATE TRIGGER cc_guard BEFORE UPDATE ON cost_changes WHEN json_extract(NEW.payload,'$.status') IN ('Approved','Reversed') AND NOT EXISTS(SELECT 1 FROM commercial_mutation_guard) BEGIN SELECT RAISE(ABORT,'governed commercial required'); END",
-  "CREATE TRIGGER cert_guard BEFORE UPDATE ON payment_certificates WHEN json_extract(NEW.payload,'$.status') IN ('Approved','Paid','Reversed') AND NOT EXISTS(SELECT 1 FROM commercial_mutation_guard) BEGIN SELECT RAISE(ABORT,'governed commercial required'); END"
+  "CREATE TRIGGER cert_guard BEFORE UPDATE ON payment_certificates WHEN json_extract(NEW.payload,'$.status') IN ('Approved','Partially Paid','Paid','Reversed') AND NOT EXISTS(SELECT 1 FROM commercial_mutation_guard) BEGIN SELECT RAISE(ABORT,'governed commercial required'); END"
  ]{sqlx::query(q).execute(&p).await.unwrap();}
   sqlx::query("INSERT INTO contracts VALUES('c',NULL,?)").bind(json!({"advance_amount":100,"retention_cap_amount":150}).to_string()).execute(&p).await.unwrap();
   sqlx::query("INSERT INTO contract_sov_lines VALUES('s','t','p','c',NULL,NULL,NULL,NULL,?)").bind(json!({"original_budget":1000,"status":"Active"}).to_string()).execute(&p).await.unwrap();

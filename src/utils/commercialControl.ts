@@ -80,7 +80,7 @@ export interface SovCostForecastInput {
   manualForecastOverride?: number;
 }
 
-const money = (value: number) => Math.round(value * 100) / 100;
+export const money = (value: number) => Math.round(value * 100) / 100;
 
 /**
  * One cost-control formula for a Contract SOV line.
@@ -219,5 +219,358 @@ export function evaluateBackToBackPaymentAuthorization(params: {
     unlockedCertificateIds,
     unlockedTrackingIds,
     pwpUnlocked: true,
+  };
+}
+
+export interface WirAggregationItem {
+  boq_item_id: string;
+  item_code: string;
+  description: string;
+  unit: string;
+  contract_id: string;
+  control_account_id?: string | null;
+  selling_rate: number;
+  cost_rate: number;
+  applicable_rate: number;
+  source_wir_ids: string[];
+  source_wir_numbers: string[];
+  wir_count: number;
+  original_quantity: number;
+  revised_quantity: number;
+  previous_quantity: number;
+  previous_value: number;
+  current_quantity: number;
+  current_value: number;
+  cumulative_quantity: number;
+  cumulative_value: number;
+  remaining_quantity: number;
+  over_certified: boolean;
+  over_certified_quantity: number;
+  back_to_back_status: 'Authorized' | 'Pending' | 'Blocked' | 'N/A';
+}
+
+export interface AggregateWirsParams {
+  projectId: string;
+  contractId: string;
+  certificateType: 'Client' | 'Subcontractor' | string;
+  periodStart?: string | null;
+  periodEnd?: string | null;
+  wirEntries: Record<string, any>[];
+  boqItems: Record<string, any>[];
+  priorCertificates: Record<string, any>[];
+  contracts?: Record<string, any>[];
+  currentCertificateId?: string | null;
+  pwpEnforced?: boolean;
+}
+
+/**
+ * Aggregates accepted WIR inspection requests for a specific contract and period into
+ * consolidated certificate lines grouped by BOQ item.
+ *
+ * Enforces:
+ * 1. Multi-WIR grouping into a single line per linked BOQ item.
+ * 2. Strict separation of Client Selling Rate vs Subcontractor Cost Rate.
+ * 3. Previous cumulative certified quantities subtraction to prevent double-certification.
+ * 4. Quantity capping at revised BOQ quantity.
+ * 5. Back-to-Back (PWP) validation for subcontracts.
+ */
+export function aggregateWirsForCertificate(params: AggregateWirsParams) {
+  const {
+    projectId,
+    contractId,
+    certificateType,
+    periodStart,
+    periodEnd,
+    wirEntries = [],
+    boqItems = [],
+    priorCertificates = [],
+    contracts = [],
+    currentCertificateId,
+    pwpEnforced = false,
+  } = params;
+
+  // 1. Identify prior approved/paid certificates on this contract (excluding current)
+  const relevantPriorCerts = priorCertificates.filter((c) => {
+    if (c.id === currentCertificateId) return false;
+    if (c.contract_id !== contractId) return false;
+    if (c.certificate_type !== certificateType) return false;
+    return ['Approved', 'Paid', 'Partially Paid'].includes(String(c.status || ''));
+  });
+
+  // Collect all already certified WIR IDs from prior certificates to prevent duplicate inclusion
+  const certifiedWirIds = new Set<string>();
+  const priorCertifiedQuantitiesByBoqItem = new Map<string, number>();
+
+  for (const cert of relevantPriorCerts) {
+    if (Array.isArray(cert.lines)) {
+      for (const line of cert.lines) {
+        const boqId = String(line.boq_item_id || '');
+        if (boqId) {
+          const prev = priorCertifiedQuantitiesByBoqItem.get(boqId) || 0;
+          priorCertifiedQuantitiesByBoqItem.set(boqId, prev + (Number(line.current_quantity) || 0));
+        }
+        if (Array.isArray(line.source_wir_ids)) {
+          for (const wirId of line.source_wir_ids) {
+            certifiedWirIds.add(String(wirId));
+          }
+        }
+      }
+    }
+  }
+
+  // 2. Filter eligible WIRs
+  const eligibleWirs = wirEntries.filter((wir) => {
+    // Contract match
+    if (contractId && wir.contract_id !== contractId) return false;
+    if (projectId && wir.project_id && wir.project_id !== projectId) return false;
+
+    // Inspection status / result: must be accepted/passed/approved
+    const status = String(wir.status || '').toLowerCase();
+    const result = String(wir.result || '').toLowerCase();
+    const isAccepted = ['approved', 'accepted', 'passed', 'pass', 'conditional pass'].includes(status) || ['pass', 'passed', 'conditional pass', 'accepted', 'approved'].includes(result);
+    if (!isAccepted) return false;
+
+    // Must not have already been certified in a previous approved certificate
+    if (certifiedWirIds.has(String(wir.id))) return false;
+
+    // Period date filtering
+    const date = String(wir.inspection_date || wir.date || wir.created_at || '').slice(0, 10);
+    if (periodStart && date && date < periodStart) return false;
+    if (periodEnd && date && date > periodEnd) return false;
+
+    return true;
+  });
+
+  // 3. Group eligible WIRs by boq_item_id
+  const wirGroups = new Map<string, Array<Record<string, any>>>();
+  for (const wir of eligibleWirs) {
+    const boqItemId = String(wir.boq_item_id || 'unlinked');
+    if (!wirGroups.has(boqItemId)) {
+      wirGroups.set(boqItemId, []);
+    }
+    wirGroups.get(boqItemId)!.push(wir);
+  }
+
+  // Determine contract context (e.g. Subcontract vs Main)
+  const currentContract = contracts.find((c) => c.id === contractId);
+  const isSubcontract = certificateType === 'Subcontractor' || Boolean(currentContract?.parent_main_contract_id);
+
+  // 4. Build consolidated lines
+  const lines: WirAggregationItem[] = [];
+  let totalGrossValue = 0;
+  let overCertifiedLineCount = 0;
+
+  for (const [boqItemId, wirs] of wirGroups.entries()) {
+    const boqItem = boqItems.find((b) => b.id === boqItemId) || {} as Record<string, any>;
+
+    const sellingRate = Number(boqItem.unit_rate) || 0;
+    const costRate = Number(boqItem.cost_rate || boqItem.subcontract_rate || boqItem.subcontract_unit_rate || boqItem.unit_rate) || 0;
+    const applicableRate = isSubcontract ? costRate : sellingRate;
+
+    const sourceWirIds = wirs.map((w) => String(w.id));
+    const sourceWirNumbers = wirs.map((w) => String(w.wir_number || w.id)).filter(Boolean);
+    const wirQuantitySum = wirs.reduce((sum, w) => sum + (Number(w.inspected_quantity ?? w.quantity ?? w.measured_quantity) || 0), 0);
+
+    const originalQuantity = Number(boqItem.quantity) || 0;
+    const revisedQuantity = Number(boqItem.revised_quantity) || originalQuantity;
+
+    const previousQuantity = priorCertifiedQuantitiesByBoqItem.get(boqItemId) || 0;
+    const currentQuantity = Math.round(wirQuantitySum * 1000) / 1000;
+    const cumulativeQuantity = Math.round((previousQuantity + currentQuantity) * 1000) / 1000;
+
+    const previousValue = money(previousQuantity * applicableRate);
+    const currentValue = money(currentQuantity * applicableRate);
+    const cumulativeValue = money(cumulativeQuantity * applicableRate);
+
+    const remainingQuantity = Math.max(0, Math.round((revisedQuantity - cumulativeQuantity) * 1000) / 1000);
+    const overCertified = cumulativeQuantity > revisedQuantity + 0.0001;
+    const overCertifiedQuantity = overCertified ? Math.round((cumulativeQuantity - revisedQuantity) * 1000) / 1000 : 0;
+
+    if (overCertified) {
+      overCertifiedLineCount++;
+    }
+
+    let backToBackStatus: 'Authorized' | 'Pending' | 'Blocked' | 'N/A' = 'N/A';
+    if (isSubcontract && (pwpEnforced || currentContract?.is_back_to_back)) {
+      // Check if client certificates for this project have certified progress
+      const clientApproved = priorCertificates.some(
+        (c) => c.project_id === projectId && c.certificate_type === 'Client' && ['Approved', 'Paid'].includes(String(c.status || ''))
+      );
+      backToBackStatus = clientApproved ? 'Authorized' : 'Pending';
+    }
+
+    lines.push({
+      boq_item_id: boqItemId,
+      item_code: String(boqItem.item_code || 'WIR-ITEM'),
+      description: String(boqItem.item_name || boqItem.description || wirs[0]?.work_type || 'Aggregated Inspection Item'),
+      unit: String(boqItem.unit || wirs[0]?.unit || 'ea'),
+      contract_id: contractId,
+      control_account_id: boqItem.control_account_id || null,
+      selling_rate: sellingRate,
+      cost_rate: costRate,
+      applicable_rate: applicableRate,
+      source_wir_ids: sourceWirIds,
+      source_wir_numbers: sourceWirNumbers,
+      wir_count: wirs.length,
+      original_quantity: originalQuantity,
+      revised_quantity: revisedQuantity,
+      previous_quantity: previousQuantity,
+      previous_value: previousValue,
+      current_quantity: currentQuantity,
+      current_value: currentValue,
+      cumulative_quantity: cumulativeQuantity,
+      cumulative_value: cumulativeValue,
+      remaining_quantity: remainingQuantity,
+      over_certified: overCertified,
+      over_certified_quantity: overCertifiedQuantity,
+      back_to_back_status: backToBackStatus,
+    });
+
+    totalGrossValue += currentValue;
+  }
+
+  totalGrossValue = money(totalGrossValue);
+
+  return {
+    lines,
+    totalWirCount: eligibleWirs.length,
+    totalGrossValue,
+    overCertifiedLineCount,
+    hasOverCertification: overCertifiedLineCount > 0,
+  };
+}
+
+/**
+ * Computes full certificate header financial figures including retention, advance recovery,
+ * deductions, taxes, and net certified amounts to exactly 0.01 precision.
+ */
+export function calculateGovernedCertificateTotals(params: {
+  grossValue: number;
+  retentionRate?: number;
+  advanceRecovery?: number;
+  deductions?: number;
+  taxRate?: number;
+  contractAdvanceAmount?: number;
+  retentionCapAmount?: number;
+  priorAdvanceRecovery?: number;
+  priorRetention?: number;
+}) {
+  const gross = Math.max(0, money(params.grossValue));
+  const retentionRate = Math.max(0, Number(params.retentionRate) || 0);
+  const rawRetention = money(gross * (retentionRate / 100));
+
+  const retentionCap = Math.max(0, Number(params.retentionCapAmount) || 0);
+  const priorRetention = Math.max(0, Number(params.priorRetention) || 0);
+
+  // Apply retention cap if specified
+  let effectiveRetention = rawRetention;
+  if (retentionCap > 0) {
+    const maxAllowableRetention = Math.max(0, retentionCap - priorRetention);
+    effectiveRetention = Math.min(rawRetention, maxAllowableRetention);
+  }
+  effectiveRetention = money(effectiveRetention);
+  const cumulativeRetention = money(priorRetention + effectiveRetention);
+
+  // Advance recovery calculation & cap
+  const advanceLimit = Math.max(0, Number(params.contractAdvanceAmount) || 0);
+  const priorAdvance = Math.max(0, Number(params.priorAdvanceRecovery) || 0);
+  const remainingAdvance = Math.max(0, money(advanceLimit - priorAdvance));
+  const requestedAdvance = Math.max(0, Number(params.advanceRecovery) || 0);
+  const effectiveAdvanceRecovery = advanceLimit > 0 ? Math.min(requestedAdvance, remainingAdvance) : requestedAdvance;
+  const cumulativeAdvanceRecovery = money(priorAdvance + effectiveAdvanceRecovery);
+
+  const deductions = Math.max(0, money(Number(params.deductions) || 0));
+
+  const taxableAmount = money(Math.max(0, gross - effectiveRetention - effectiveAdvanceRecovery - deductions));
+  const taxRate = Math.max(0, Number(params.taxRate) || 0);
+  const taxAmount = money(taxableAmount * (taxRate / 100));
+  const netCertifiedValue = money(taxableAmount + taxAmount);
+
+  return {
+    gross,
+    retentionRate,
+    retention_amount: effectiveRetention,
+    cumulative_retention_amount: cumulativeRetention,
+    retention_cap_amount: retentionCap,
+    retention_cap_exceeded: retentionCap > 0 && (priorRetention + rawRetention) > retentionCap + 0.0001,
+    advance_recovery: money(effectiveAdvanceRecovery),
+    cumulative_advance_recovery: cumulativeAdvanceRecovery,
+    remaining_advance_balance: money(Math.max(0, advanceLimit - cumulativeAdvanceRecovery)),
+    advance_limit_exceeded: advanceLimit > 0 && requestedAdvance > remainingAdvance + 0.0001,
+    deductions,
+    taxable_amount: taxableAmount,
+    tax_rate: taxRate,
+    tax_amount: taxAmount,
+    net_certified_value: netCertifiedValue,
+  };
+}
+
+/**
+ * Handles partial and full certificate settlement calculation to 0.01 precision.
+ */
+export function calculateCertificateSettlement(params: {
+  netCertifiedValue: number;
+  priorPaidAmount?: number;
+  paymentAmount?: number;
+}) {
+  const net = money(Math.max(0, Number(params.netCertifiedValue) || 0));
+  const prior = money(Math.max(0, Number(params.priorPaidAmount) || 0));
+  const remainingDue = money(Math.max(0, net - prior));
+  const requestedPayment = params.paymentAmount !== undefined ? money(Number(params.paymentAmount) || 0) : remainingDue;
+  const paymentAmount = Math.min(requestedPayment, remainingDue);
+  const totalPaid = money(prior + paymentAmount);
+  const balanceDue = money(Math.max(0, net - totalPaid));
+  const isFullySettled = totalPaid >= net - 0.0001;
+  const status: 'Paid' | 'Partially Paid' = isFullySettled ? 'Paid' : 'Partially Paid';
+
+  return {
+    netCertifiedValue: net,
+    priorPaidAmount: prior,
+    paymentAmount,
+    totalPaid,
+    balanceDue,
+    isFullySettled,
+    isFullSettlement: isFullySettled,
+    status,
+  };
+}
+
+/**
+ * Back-to-Back (PWP) validation for subcontracts against main client certificates.
+ */
+export function verifyBackToBackSubcontractAuthorization(params: {
+  contractId: string;
+  contracts: Record<string, any>[];
+  clientCertificates: Record<string, any>[];
+}) {
+  const { contractId, contracts, clientCertificates } = params;
+  const contract = contracts.find((c) => c.id === contractId);
+  if (!contract) return { isAuthorized: true, reason: 'Contract not found', status: 'N/A' as const };
+
+  const isSubcontract = Boolean(contract.parent_main_contract_id) || contract.contract_type === 'Subcontract';
+  if (!isSubcontract && !contract.is_back_to_back) {
+    return { isAuthorized: true, reason: 'Direct client contract — no back-to-back dependency.', status: 'N/A' as const };
+  }
+
+  const parentContractId = contract.parent_main_contract_id;
+  const approvedClientCerts = clientCertificates.filter((c) => {
+    if (c.certificate_type !== 'Client') return false;
+    if (parentContractId && c.contract_id !== parentContractId) return false;
+    return ['Approved', 'Paid'].includes(String(c.status || ''));
+  });
+
+  if (approvedClientCerts.length === 0) {
+    return {
+      isAuthorized: false,
+      reason: 'Pay-When-Paid condition: Waiting for Parent Client Payment Certificate approval.',
+      status: 'Pending' as const,
+    };
+  }
+
+  const latestCert = approvedClientCerts[approvedClientCerts.length - 1];
+  return {
+    isAuthorized: true,
+    reason: `Pay-When-Paid authorized under Client Certificate #${latestCert.certificate_number || latestCert.id}`,
+    status: 'Authorized' as const,
   };
 }

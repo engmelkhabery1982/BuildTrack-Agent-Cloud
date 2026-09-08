@@ -25,6 +25,7 @@ import { CostVarianceDrillDownModal } from '@/components/CostVarianceDrillDownMo
 import { LaborTimesheetModal } from '@/components/LaborTimesheetModal';
 import { EquipmentLogModal } from '@/components/EquipmentLogModal';
 import { ClaimAssessmentModal } from '@/components/ClaimAssessmentModal';
+import { PaymentCertificateReconciliationModal } from '@/components/PaymentCertificateReconciliationModal';
 import { IntegratedProjectControlsCockpit } from '@/components/IntegratedProjectControlsCockpit';
 import { ExternalPortalView } from '@/components/ExternalPortalView';
 import { VarianceActionRegisterView } from '@/components/VarianceActionRegisterView';
@@ -1141,6 +1142,8 @@ function AppWorkspace() {
   const [selectedEquipmentLog, setSelectedEquipmentLog] = useState<any | null>(null);
   const [claimModalOpen, setClaimModalOpen] = useState(false);
   const [selectedClaim, setSelectedClaim] = useState<any | null>(null);
+  const [paymentCertificateModalOpen, setPaymentCertificateModalOpen] = useState(false);
+  const [selectedPaymentCertificate, setSelectedPaymentCertificate] = useState<any | null>(null);
   const { dataDate: unifiedDataDate } = useProjectDataDate();
   const data = useData();
   const {
@@ -2456,6 +2459,8 @@ function AppWorkspace() {
           resourceMasters={data.resourceMasters as Record<string, any>[]}
           scheduleResourceAssignments={data.scheduleResourceAssignments as Record<string, any>[]}
           workCalendars={data.workCalendars as Record<string, any>[]}
+          paymentCertificates={data.paymentCertificates}
+          cashForecastVersions={data.cashForecastVersions}
           onDataReload={data.reload}
           onNavigate={setActiveView}
         />
@@ -4060,13 +4065,11 @@ function AppWorkspace() {
             await data.reload();
           },
         } : tableName === 'payment_certificates' ? {
-          label: 'Reverse Certificate',
-          title: 'Reverse a governed payment certificate and remove its generated cash movement without deleting history.',
-          onClick: async (row) => {
-            const reason = window.prompt('Reason for governed payment-certificate reversal:');
-            if (!reason?.trim()) return;
-            await reverseCommercialPosting({ operationId: crypto.randomUUID(), sourceTable: 'payment_certificates', sourceId: row.id, actor: 'Local User', reason: reason.trim() });
-            await data.reload();
+          label: 'Reconcile & Settle',
+          title: 'Open Payment Certificate & WIR Inspection Reconciliation Workbench',
+          onClick: (row) => {
+            setSelectedPaymentCertificate(row);
+            setPaymentCertificateModalOpen(true);
           },
         } : tableName === 'client_invoices' ? {
           label: 'Preview Invoice',
@@ -4581,6 +4584,10 @@ function AppWorkspace() {
           setSelectedClaim(null);
           setClaimModalOpen(true);
           return null as any;
+        } : tableName === 'payment_certificates' ? () => {
+          setSelectedPaymentCertificate(null);
+          setPaymentCertificateModalOpen(true);
+          return null as any;
         } : undefined}
       />
       <ScheduleVersionModal
@@ -4946,6 +4953,92 @@ function AppWorkspace() {
           } catch {
             await dataRepository.update('claims', claimData.id, claimData);
             data.applyLocalMutation('claims', { type: 'update', row: claimData });
+          }
+          await data.reload();
+        }}
+      />
+      <PaymentCertificateReconciliationModal
+        isOpen={paymentCertificateModalOpen}
+        onClose={() => {
+          setPaymentCertificateModalOpen(false);
+          setSelectedPaymentCertificate(null);
+        }}
+        certificate={selectedPaymentCertificate}
+        projects={data.projects}
+        contracts={data.contracts}
+        boqItems={data.boqItems}
+        wirEntries={data.wirEntries || []}
+        priorCertificates={data.paymentCertificates || []}
+        clientCertificates={(data.paymentCertificates || []).filter((c: any) => c.certificate_type === 'Client')}
+        invoiceTrackings={data.clientInvoiceTracking || []}
+        onSaveCertificate={async (cert) => {
+          if (cert.id && data.paymentCertificates.some((c: any) => c.id === cert.id)) {
+            await dataRepository.update('payment_certificates', cert.id, cert);
+            data.applyLocalMutation('payment_certificates', { type: 'update', row: cert });
+          } else {
+            const inserted = await dataRepository.insert('payment_certificates', cert as any);
+            data.applyLocalMutation('payment_certificates', { type: 'insert', row: inserted });
+          }
+          await data.reload();
+        }}
+        onApproveCertificate={async (certId, approvedDate) => {
+          if ('__TAURI_INTERNALS__' in window) {
+            await approvePaymentCertificate({
+              operationId: crypto.randomUUID(),
+              sourceId: certId,
+              actor: sessionUser?.username || 'Commercial Manager',
+              approvedAt: approvedDate || new Date().toISOString().slice(0, 10),
+            });
+          } else {
+            await dataRepository.update('payment_certificates', certId, {
+              status: 'Approved',
+              approved_date: approvedDate,
+              approved_by: sessionUser?.username || 'Commercial Manager',
+            });
+          }
+          await data.reload();
+        }}
+        onSettleCertificate={async (certId, paidDate, paymentAmount) => {
+          if ('__TAURI_INTERNALS__' in window) {
+            await settlePaymentCertificate({
+              operationId: crypto.randomUUID(),
+              certificateId: certId,
+              actor: sessionUser?.username || 'Commercial Manager',
+              paidAt: paidDate || new Date().toISOString().slice(0, 10),
+              paymentAmount,
+            });
+          } else {
+            const current = data.paymentCertificates.find((c: any) => c.id === certId);
+            const net = Number(current?.net_certified_value) || 0;
+            const priorPaid = Number(current?.paid_amount) || 0;
+            const amt = paymentAmount !== undefined ? paymentAmount : (net - priorPaid);
+            const totalPaid = priorPaid + amt;
+            const isFull = totalPaid >= net - 0.001;
+            await dataRepository.update('payment_certificates', certId, {
+              status: isFull ? 'Paid' : 'Partially Paid',
+              payment_date: paidDate,
+              paid_by: sessionUser?.username || 'Commercial Manager',
+              paid_amount: totalPaid,
+              balance_due: Math.max(0, net - totalPaid),
+            });
+          }
+          await data.reload();
+        }}
+        onReverseCertificate={async (certId, reason) => {
+          if ('__TAURI_INTERNALS__' in window) {
+            await reverseCommercialPosting({
+              operationId: crypto.randomUUID(),
+              sourceTable: 'payment_certificates',
+              sourceId: certId,
+              actor: sessionUser?.username || 'Commercial Manager',
+              reason,
+            });
+          } else {
+            await dataRepository.update('payment_certificates', certId, {
+              status: 'Reversed',
+              reversed_by: sessionUser?.username || 'Commercial Manager',
+              reversal_reason: reason,
+            });
           }
           await data.reload();
         }}
