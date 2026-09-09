@@ -2,7 +2,7 @@
 
 Status: READY FOR CODEX LOCAL VERIFICATION
 
-START_HEAD=2e89cd6af553dae8bca4ca91ef7cfbdd771b784f
+START_HEAD=96d92263f1605a14df2ddcbb6a6381e0879b6726
 
 Evidence commands completed in Arena:
 
@@ -40,7 +40,7 @@ W04-G09=PASS
 Evidence: subcontract/client streams remain separately scoped; no generic browser unlock or fallback approval path is used.
 
 W04-G10=PENDING_LOCAL_CARGO
-Evidence: Node tests, build, targeted W04 tests, and diff check passed; Cargo execution is pending Codex local verification because `cargo` is unavailable in Arena.
+Evidence: added executable Rust/SQLite tests for lock-stream uniqueness, append-only reversal history, invalid payment rejection and operation-id uniqueness; Node tests/build/diff passed. Cargo execution is pending Codex local verification because `cargo` is unavailable in Arena.
 
 W04-R01=PASS
 Evidence: `create_payment_certificate_draft` is the governed backend creation path from identifiers and WIR IDs only; header, source lines, values and audit scope are transaction-bound.
@@ -76,4 +76,4 @@ W04-R11=PASS
 Evidence: no broad client-certificate unlock is used; client and subcontractor certificates remain contract/BOQ/WIR scoped.
 
 W04-R12=PENDING_LOCAL_CARGO
-Evidence: all available Node/build/diff gates passed; full Rust/SQLite execution is pending Codex local Cargo verification.
+Evidence: all available Node/build/diff gates passed and executable Rust/SQLite tests are present; full Rust/SQLite execution is pending Codex local Cargo verification.
