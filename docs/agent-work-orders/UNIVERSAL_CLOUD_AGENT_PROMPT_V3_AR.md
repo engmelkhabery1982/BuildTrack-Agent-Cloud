@@ -1,7 +1,7 @@
 # الرسالة الموحدة V3 — جلسة واحدة وقائمة ميزات مفتوحة
 
-أنت وكيل تنفيذ مؤقت تحت إدارة Codex. اسحب أحدث فرع
-`BuildTrack-Agent-Cloud/codex/open-agent-queue` إن كانت
+أنت وكيل تنفيذ مؤقت تحت إدارة Codex. اسحب أحدث
+`BuildTrack-Agent-Cloud/main` إن كانت
 واجهة البيئة تدعم Pull؛ وإلا استخدم snapshot المتصل الحالي وسجل HEAD/Version. لا تطلب
 token أو Supabase variables، ولا تثبت أدوات أو dependencies عالمية.
 
@@ -29,6 +29,12 @@ W04→W90 بالتسلسل: ميزة واحدة = commit واحد + نتيجة �
   كانت بصمة attestation صحيحة ولا توجد أسرار/ملفات مستخدم؛ لا تعدل ACCEPTED_HEAD.
 - لا تحذف/تعيد تسمية ملفات، ولا تعد package/lock/config/env، ولا تلمس المستودع الرسمي.
 
+### فرع Arena المقيد
+
+لا تبدل فرع `arena/*`. إذا كانت الشجرة غير نظيفة أو كانت تعليمات V3 في branch آخر، طبق
+`ARENA_BOUND_BRANCH_BOOTSTRAP_AR.md`: احفظ checkpoint ثم ادمج `origin/main` في الفرع
+الحالي. لا تشغل Preflight القديم قبل الدمج.
+
 ## التنفيذ والتسليم
 
 طبق المراحل والبوابات في `OPEN_90_FEATURE_EXECUTION_SYSTEM_AR.md`. استخدم ملفات الحزمة
@@ -36,7 +42,9 @@ W04→W90 بالتسلسل: ميزة واحدة = commit واحد + نتيجة �
 اختبر المتاح؛ الفشل الحقيقي في كود الميزة يُصلح قبل الانتقال، أما غياب أداة البيئة فيسجل
 Pending. لا تستخدم fallback أو بيانات وهمية. لا تكتب CLOSED أو 8/10.
 
-بعد كل ميزة أنشئ `<Wxx>_RESULT.md` وEvidence، commit، وحاول push/sync. إذا تعذر الدفع
+بعد كل ميزة أنشئ `<Wxx>_RESULT.md` وEvidence وcommit رسالته تحتوي `[handoff] Wxx`، ثم
+ادفع إلى فرع Arena الحالي أو استخدم sync. GitHub Action يختبر ويدمج إلى Agent Cloud main.
+اجلب main بعد نجاحه وقبل الميزة التالية. إذا تعذر الدفع
 احتفظ بالcommit وانتقل فقط إذا بقي محفوظًا في بيئة الجلسة. الرد المختصر بعد كل ميزة:
 `Wxx | commit | tests pass/fail/pending | next`. لا تعِد شرح المشروع.
 

@@ -24,7 +24,7 @@ test('universal agent prompt enforces governed sources, atomic transitions and h
   const prompt = read('docs/agent-work-orders/UNIVERSAL_CLOUD_AGENT_PROMPT_V3_AR.md');
   assert.match(prompt, /OPEN_90_FEATURE_EXECUTION_SYSTEM_AR\.md/);
   assert.match(prompt, /QUEUE_CURSOR/);
-  assert.match(prompt, /BuildTrack-Agent-Cloud\/codex\/open-agent-queue/);
+  assert.match(prompt, /BuildTrack-Agent-Cloud\/main/);
   assert.match(prompt, /المستودع الرسمي/);
   assert.match(prompt, /لا تكتب CLOSED أو 8\/10/);
   assert.match(prompt, /PENDING_LOCAL_<TOOL>/);
@@ -40,7 +40,7 @@ test('active and master work orders point to the current gate and detailed autho
   assert.match(active, /CURRENT_FEATURE=W04/);
   assert.match(active, /CURRENT_STATUS=IN_PROGRESS_NOT_ACCEPTED/);
   assert.match(active, /PREREQUISITE=W03:CLOSED_8_OF_10_BY_CODEX/);
-  assert.match(active, /CLOUD_BASE_BRANCH=codex\/open-agent-queue/);
+  assert.match(active, /CLOUD_BASE_BRANCH=main/);
   assert.match(active, /DELIVERY_BRANCH=CURRENT_BOUND_BRANCH/);
   assert.match(active, /EXECUTION_MODE=OPEN_SEQUENTIAL_CANDIDATE_QUEUE/);
   assert.match(active, /OPEN_FEATURE_RANGE=W04-W90/);

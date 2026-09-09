@@ -1,0 +1,104 @@
+name: Promote Arena handoff to Agent Cloud main
+
+on:
+  push:
+    branches:
+      - 'arena/**'
+  workflow_dispatch:
+    inputs:
+      source_branch:
+        description: 'Arena branch to verify and promote (arena/...)'
+        required: true
+        type: string
+
+concurrency:
+  group: buildtrack-agent-cloud-main-promotion
+  cancel-in-progress: false
+
+jobs:
+  select:
+    runs-on: ubuntu-latest
+    outputs:
+      source_branch: ${{ steps.source.outputs.branch }}
+      source_sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - id: source
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PUSH_BRANCH: ${{ github.ref_name }}
+          PUSH_SHA: ${{ github.sha }}
+          PUSH_MESSAGE: ${{ github.event.head_commit.message }}
+          MANUAL_BRANCH: ${{ inputs.source_branch }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            [[ "$PUSH_BRANCH" == arena/* ]] || { echo "Only arena/* branches are accepted."; exit 1; }
+            [[ "$PUSH_MESSAGE" == *"[handoff]"* ]] || { echo "No [handoff] marker; nothing to promote."; exit 1; }
+            branch="$PUSH_BRANCH"
+            sha="$PUSH_SHA"
+          else
+            [[ "$MANUAL_BRANCH" == arena/* ]] || { echo "source_branch must start with arena/."; exit 1; }
+            branch="$MANUAL_BRANCH"
+            sha=""
+          fi
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+  verify:
+    needs: select
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.select.outputs.source_branch }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm test
+      - run: npm run build
+      - name: Verify handoff diff policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git diff --check origin/main...HEAD
+          changes="$(git diff --name-status origin/main...HEAD)"
+          echo "$changes"
+          if echo "$changes" | grep -Eq '^[DR]'; then
+            echo "Delete or rename is forbidden in automatic handoff."
+            exit 1
+          fi
+          if echo "$changes" | cut -f2- | grep -Eiq '(^|/)(\.env($|\.)|node_modules/|dist/|target/)|\.(db|sqlite|sqlite3|zip)$|^\.github/workflows/'; then
+            echo "Secret, artifact, database, or workflow modification is forbidden."
+            exit 1
+          fi
+
+  promote:
+    needs: [select, verify]
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Merge verified Arena commit into Agent Cloud main
+        shell: bash
+        env:
+          SOURCE_BRANCH: ${{ needs.select.outputs.source_branch }}
+        run: |
+          set -euo pipefail
+          git config user.name "BuildTrack Handoff Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git fetch origin main
+          git fetch origin "refs/heads/$SOURCE_BRANCH:refs/remotes/origin/$SOURCE_BRANCH"
+          git checkout -B main origin/main
+          git merge --no-ff --no-edit "origin/$SOURCE_BRANCH"
+          git push origin main
