@@ -16,6 +16,25 @@ use std::path::Path;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CreateCertificateRequest {
+    pub project_id: String,
+    pub contract_id: String,
+    pub period_id: String,
+    pub certificate_type: String,
+    pub wir_ids: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CertificateDraftResult {
+    pub certificate_id: String,
+    pub status: String,
+    pub line_count: usize,
+    pub gross_certified_value: f64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SubmitCertificateRequest {
     pub operation_id: String,
     pub certificate_id: String,
@@ -81,6 +100,10 @@ pub struct CertificateOperationResult {
     pub remaining_balance: Option<f64>,
     pub total_paid_amount: Option<f64>,
 }
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GetPartialPaymentsRequest { pub certificate_id: String }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -302,7 +325,7 @@ async fn cash(
         "source_id": source
     });
 
-    sqlx::query("INSERT OR REPLACE INTO cash_flow(id,created_at,project_id,contract_id,boq_header_id,boq_item_id,parent_main_project_id,parent_main_contract_id,payload) VALUES (?,?,?,?,?,?,?,?,?)")
+    sqlx::query("INSERT INTO cash_flow(id,created_at,project_id,contract_id,boq_header_id,boq_item_id,parent_main_project_id,parent_main_contract_id,payload) VALUES (?,?,?,?,?,?,?,?,?)")
         .bind(&cash_id).bind(stamp()).bind(&scope.project_id).bind(&scope.contract_id).bind(&scope.boq_header_id).bind(&scope.boq_item_id).bind(&scope.parent_main_project_id).bind(&scope.parent_main_contract_id).bind(payload.to_string())
         .execute(&mut **tx).await.map_err(|e| e.to_string())?;
     Ok(())
@@ -348,7 +371,8 @@ async fn synchronize_invoice_tracking(
         return Err("Selected invoice register has no invoice number.".into());
     }
 
-    let cert_status = status_override.unwrap_or_else(|| s(certificate, "status").as_str());
+    let certificate_status = s(certificate, "status");
+    let cert_status = status_override.unwrap_or(certificate_status.as_str());
     let (status, payment_status) = match cert_status {
         "Reversed" => ("Generated", "Unpaid"),
         "Paid" => ("Approved", "Paid"),
@@ -442,6 +466,72 @@ async fn check_over_certification(
         }
     }
     Ok(())
+}
+
+/// Creates a Draft only from authoritative project, contract, period and Approved WIR rows.
+/// The UI supplies identifiers, never rates, quantities, totals or lifecycle state.
+pub async fn create_payment_certificate_draft(
+    path: &Path,
+    r: CreateCertificateRequest,
+) -> Result<CertificateDraftResult, String> {
+    if r.project_id.trim().is_empty() || r.contract_id.trim().is_empty() || r.period_id.trim().is_empty() {
+        return Err("Project, contract and reporting period are required.".into());
+    }
+    if !matches!(r.certificate_type.as_str(), "Client" | "Subcontractor") {
+        return Err("Certificate type must be Client or Subcontractor.".into());
+    }
+    if r.wir_ids.is_empty() { return Err("At least one WIR is required.".into()); }
+    let mut tx = db(path).await?.begin().await.map_err(|e| e.to_string())?;
+    let outcome = async {
+        let contract = sqlx::query("SELECT project_id,parent_main_contract_id FROM contracts WHERE id=?")
+            .bind(&r.contract_id).fetch_optional(&mut *tx).await.map_err(|e| e.to_string())?
+            .ok_or("Selected contract was not found.")?;
+        let contract_project: String = contract.try_get("project_id").map_err(|e| e.to_string())?;
+        if contract_project != r.project_id { return Err("Contract is outside the selected project.".into()); }
+        let period = sqlx::query("SELECT project_id,payload FROM reporting_periods WHERE id=?")
+            .bind(&r.period_id).fetch_optional(&mut *tx).await.map_err(|e| e.to_string())?
+            .ok_or("Reporting period was not found.")?;
+        let period_project: String = period.try_get("project_id").map_err(|e| e.to_string())?;
+        if period_project != r.project_id { return Err("Reporting period is outside the selected project.".into()); }
+        let parent_contract: Option<String> = contract.try_get("parent_main_contract_id").map_err(|e| e.to_string())?;
+        if r.certificate_type == "Client" && parent_contract.is_some() { return Err("Client certificates require the main contract.".into()); }
+        if r.certificate_type == "Subcontractor" && parent_contract.is_none() { return Err("Subcontractor certificates require a subcontract.".into()); }
+        let id = format!("pc:{}:{}", r.contract_id, stamp());
+        let mut items = Vec::new();
+        let mut gross = 0.0_f64;
+        for wir_id in &r.wir_ids {
+            let row = sqlx::query("SELECT project_id,contract_id,boq_item_id,payload FROM wir_entries WHERE id=?")
+                .bind(wir_id).fetch_optional(&mut *tx).await.map_err(|e| e.to_string())?
+                .ok_or_else(|| format!("WIR {wir_id} was not found."))?;
+            let project_id: String = row.try_get("project_id").map_err(|e| e.to_string())?;
+            let contract_id: Option<String> = row.try_get("contract_id").map_err(|e| e.to_string())?;
+            let boq_item_id: Option<String> = row.try_get("boq_item_id").map_err(|e| e.to_string())?;
+            let payload: Value = serde_json::from_str(&row.try_get::<String,_>("payload").map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+            if project_id != r.project_id || contract_id.as_deref() != Some(r.contract_id.as_str()) { return Err(format!("WIR {wir_id} is outside the selected contract.")); }
+            if !matches!(s(&payload, "status").as_str(), "Approved" | "Pass" | "Conditional Pass") { return Err(format!("WIR {wir_id} is not approved.")); }
+            if s(&payload, "period_id") != r.period_id { return Err(format!("WIR {wir_id} is outside the selected reporting period.")); }
+            let boq_id = boq_item_id.ok_or_else(|| format!("WIR {wir_id} has no BOQ item."))?;
+            let boq = sqlx::query("SELECT project_id,contract_id,payload FROM boq_items WHERE id=?").bind(&boq_id).fetch_optional(&mut *tx).await.map_err(|e| e.to_string())?.ok_or("BOQ item was not found.")?;
+            let boq_project: String = boq.try_get("project_id").map_err(|e| e.to_string())?;
+            let boq_contract: Option<String> = boq.try_get("contract_id").map_err(|e| e.to_string())?;
+            if boq_project != r.project_id || boq_contract.as_deref() != Some(r.contract_id.as_str()) { return Err(format!("BOQ item for WIR {wir_id} is outside the selected contract.")); }
+            let boq_payload: Value = serde_json::from_str(&boq.try_get::<String,_>("payload").map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+            let quantity = n(&payload, "quantity");
+            if quantity <= 0.0 { return Err(format!("WIR {wir_id} has no positive certified quantity.")); }
+            let rate_key = if r.certificate_type == "Client" { "unit_rate" } else { "subcontract_unit_rate" };
+            let rate = n(&boq_payload, rate_key);
+            if rate <= 0.0 { return Err(format!("Missing governed {rate_key} for BOQ item {boq_id}.")); }
+            let amount = money(quantity * rate); gross += amount;
+            items.push(json!({"boq_item_id": boq_id, "wir_ids": [wir_id], "quantity": quantity, "rate": rate, "rate_source": format!("boq_items.payload.{rate_key}"), "amount": amount}));
+        }
+        let payload = json!({"id": id, "project_id": r.project_id, "contract_id": r.contract_id, "period_id": r.period_id, "certificate_type": r.certificate_type, "status": "Draft", "items": items, "gross_certified_value": money(gross), "created_at": stamp()});
+        guard(&mut tx, &format!("create:{id}"), true).await?;
+        sqlx::query("INSERT INTO payment_certificates(id,created_at,project_id,contract_id,payload) VALUES (?,?,?,?,?)")
+            .bind(&id).bind(stamp()).bind(&r.project_id).bind(&r.contract_id).bind(payload.to_string()).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+        guard(&mut tx, &format!("create:{id}"), false).await?;
+        Ok::<CertificateDraftResult,String>(CertificateDraftResult { certificate_id: id, status: "Draft".into(), line_count: r.wir_ids.len(), gross_certified_value: money(gross) })
+    }.await;
+    match outcome { Ok(result) => { tx.commit().await.map_err(|e| e.to_string())?; Ok(result) }, Err(error) => { tx.rollback().await.map_err(|e| e.to_string())?; Err(error) } }
 }
 
 /// Command: Submit payment certificate (Draft -> Submitted)
@@ -841,12 +931,17 @@ pub async fn reverse_certificate_governed(
             ));
         }
 
-        // Release WIR certification locks (G08)
-        sqlx::query("DELETE FROM wir_certification_lock WHERE certificate_id=?")
-            .bind(&r.certificate_id)
-            .execute(&mut *tx)
-            .await
-            .map_err(|e| format!("Failed to release WIR locks: {e}"))?;
+        // Locks and payment history are append-only. A reversal records a
+        // linked compensating entry instead of deleting the source lock.
+        let locked = sqlx::query("SELECT wir_id FROM wir_certification_lock WHERE certificate_id=?")
+            .bind(&r.certificate_id).fetch_all(&mut *tx).await.map_err(|e| e.to_string())?;
+        for row in locked {
+            let wir_id: String = row.try_get("wir_id").map_err(|e| e.to_string())?;
+            let reversal_id = format!("reversal-lock:{}:{}", r.certificate_id, wir_id);
+            sqlx::query("INSERT OR IGNORE INTO certificate_lock_reversals(reversal_id,certificate_id,wir_id,operation_id,created_at,reason) VALUES (?,?,?,?,?,?)")
+                .bind(reversal_id).bind(&r.certificate_id).bind(wir_id).bind(&r.operation_id).bind(stamp()).bind(&r.reason)
+                .execute(&mut *tx).await.map_err(|e| e.to_string())?;
+        }
 
         let obj = v.as_object_mut().ok_or("Invalid certificate payload.")?;
         obj.insert("status".into(), json!("Reversed"));

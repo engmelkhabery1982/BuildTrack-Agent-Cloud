@@ -26,16 +26,13 @@ import {
   validateOverCertification,
 } from '@/utils/commercialControl';
 import {
+  createPaymentCertificateDraft,
   submitPaymentCertificate,
   approvePaymentCertificateGoverned,
   recordPartialPayment,
   reverseCertificateGoverned,
   getCertificatePartialPayments,
-  approvePaymentCertificate,
-  settlePaymentCertificate,
-  reverseCommercialPosting,
 } from '@/data/commercialWorkflow';
-import { prepareCodeControlledInsert, dataRepository } from '@/data';
 
 interface PaymentCertificateWorkbenchProps {
   projects: Project[];
@@ -89,9 +86,7 @@ export const PaymentCertificateWorkbench: React.FC<PaymentCertificateWorkbenchPr
   // Sync Contract ID when Project changes
   useEffect(() => {
     const projectContracts = contracts.filter((c) => c.project_id === selectedProjectId);
-    if (projectContracts.length > 0 && !projectContracts.some((c) => c.id === selectedContractId)) {
-      setSelectedContractId(projectContracts[0].id);
-    }
+    if (!projectContracts.some((c) => c.id === selectedContractId)) setSelectedContractId('');
   }, [selectedProjectId, contracts, selectedContractId]);
 
   // Filter approved WIRs for selected Project & Period
@@ -112,10 +107,10 @@ export const PaymentCertificateWorkbench: React.FC<PaymentCertificateWorkbenchPr
         id: w.id,
         boq_item_id: linkedBoq?.id || w.boq_item_id || 'unlinked',
         description: linkedBoq?.description || linkedBoq?.item_name || w.item_desc || w.remarks || 'Inspection',
-        unit: linkedBoq?.unit || w.unit || 'm3',
-        quantity: Number(w.quantity || w.verified_quantity || 1),
-        client_selling_rate: Number(linkedBoq?.unit_rate || w.unit_price || 100),
-        subcontract_rate: Number((linkedBoq as any)?.subcontract_rate || (linkedBoq?.unit_rate ? linkedBoq.unit_rate * 0.8 : 80)),
+        unit: linkedBoq?.unit || w.unit || '',
+        quantity: Number(w.quantity ?? w.verified_quantity),
+        client_selling_rate: Number(linkedBoq?.unit_rate ?? w.unit_price),
+        subcontract_rate: Number((linkedBoq as any)?.subcontract_rate),
       };
     });
 
@@ -146,7 +141,8 @@ export const PaymentCertificateWorkbench: React.FC<PaymentCertificateWorkbenchPr
     const warnings: string[] = [];
     aggregatedItems.forEach((item) => {
       const linkedBoq = boqItems.find((b) => b.id === item.boq_item_id);
-      const contractQty = linkedBoq?.quantity || 1000;
+      const contractQty = Number(linkedBoq?.quantity);
+      if (!Number.isFinite(contractQty) || contractQty <= 0) { warnings.push(`BOQ Item ${item.boq_item_id}: Requires setup because revised BOQ quantity is unavailable.`); return; }
       const priorCertified = linkedBoq?.verified_quantity || 0;
       const check = validateOverCertification({
         candidateQuantity: item.quantity,
@@ -186,38 +182,25 @@ export const PaymentCertificateWorkbench: React.FC<PaymentCertificateWorkbenchPr
     setSuccessMessage(null);
 
     try {
-      const payload: Partial<PaymentCertificate> = {
-        project_id: selectedProjectId,
-        contract_id: selectedContractId || contracts[0]?.id || '',
-        certificate_type: certType,
-        period_id: selectedPeriodId || null,
-        gross_certified_value: grossFromWirs,
-        retention_rate: retentionRate,
-        advance_recovery: advanceRecovery,
-        deductions,
-        tax_rate: taxRate,
-        status: 'Draft',
-        notes: notes || `Governed WIR aggregated certificate for ${certType}`,
-        items: aggregatedItems,
-        created_at: new Date().toISOString(),
-      };
-
-      const preparedPayload = prepareCodeControlledInsert('payment_certificates', payload as Record<string, unknown>, paymentCertificates as unknown as Record<string, unknown>[]);
-      const createdRow = await dataRepository.insert('payment_certificates', preparedPayload);
-      const createdId = (createdRow as any)?.id || (preparedPayload as any).id;
-
-      // Invoke submit_payment_certificate
-      if ('__TAURI_INTERNALS__' in window) {
-        await submitPaymentCertificate({
-          operationId: crypto.randomUUID(),
-          certificateId: createdId,
-          actor: sessionUser?.username || 'Commercial User',
-          submittedAt: new Date().toISOString().slice(0, 10),
-        });
-      } else {
-        await dataRepository.update('payment_certificates', createdId, { status: 'Submitted', submitted_by: 'Commercial User', submitted_date: new Date().toISOString().slice(0, 10) });
+      if (!selectedProjectId || !selectedContractId || !selectedPeriodId || eligibleWirs.length === 0) {
+        throw new Error('Select a project, contract, reporting period and at least one approved WIR.');
       }
-
+      if (!('__TAURI_INTERNALS__' in window)) {
+        throw new Error('Payment certificate creation requires the governed desktop backend.');
+      }
+      const draft = await createPaymentCertificateDraft({
+        projectId: selectedProjectId,
+        contractId: selectedContractId,
+        periodId: selectedPeriodId,
+        certificateType: certType,
+        wirIds: eligibleWirs.map((wir: any) => wir.id),
+      });
+      await submitPaymentCertificate({
+        operationId: crypto.randomUUID(),
+        certificateId: String(draft.certificateId),
+        actor: sessionUser?.username || 'Commercial User',
+        submittedAt: new Date().toISOString().slice(0, 10),
+      });
       setSuccessMessage(`Payment certificate submitted successfully!`);
       await onReload();
     } catch (err: any) {
@@ -236,7 +219,7 @@ export const PaymentCertificateWorkbench: React.FC<PaymentCertificateWorkbenchPr
         const wirLocks = (cert.items || []).flatMap((i) =>
           (i.wir_ids || []).map((wirId) => ({
             wirId,
-            periodId: cert.period_id || selectedPeriodId || 'P01',
+            periodId: cert.period_id || '',
             boqItemId: i.boq_item_id,
             certifiedQuantity: i.quantity,
             certifiedAmount: cert.certificate_type === 'Client' ? (i.client_amount || 0) : (i.subcontract_amount || 0),
@@ -250,14 +233,7 @@ export const PaymentCertificateWorkbench: React.FC<PaymentCertificateWorkbenchPr
           approvedAt: new Date().toISOString().slice(0, 10),
           wirLocks,
         });
-      } else {
-        await approvePaymentCertificate({
-          operationId: crypto.randomUUID(),
-          sourceId: cert.id,
-          actor: 'Commercial Manager',
-          approvedAt: new Date().toISOString().slice(0, 10),
-        });
-      }
+      } else { throw new Error('Certificate approval requires the governed desktop backend.'); }
 
       setSuccessMessage(`Certificate ${cert.certificate_number || cert.id} approved and WIR quantities locked.`);
       await onReload();
@@ -293,17 +269,7 @@ export const PaymentCertificateWorkbench: React.FC<PaymentCertificateWorkbenchPr
           amount: partialAmount,
           reference: partialReference,
         });
-      } else {
-        const newPaid = (paymentModalCert.total_paid_amount || 0) + partialAmount;
-        const newRemaining = currentRemaining - partialAmount;
-        const newStatus = newRemaining <= 0 ? 'Paid' : 'Partially Paid';
-        await dataRepository.update('payment_certificates', paymentModalCert.id, {
-          status: newStatus,
-          total_paid_amount: newPaid,
-          remaining_balance: newRemaining,
-          payment_date: partialDate,
-        });
-      }
+      } else { throw new Error('Payment posting requires the governed desktop backend.'); }
 
       setSuccessMessage(`Recorded partial payment of $${partialAmount.toLocaleString()} for certificate.`);
       setPaymentModalCert(null);
@@ -332,15 +298,7 @@ export const PaymentCertificateWorkbench: React.FC<PaymentCertificateWorkbenchPr
           actor: sessionUser?.username || 'Commercial Controller',
           reason: reason.trim(),
         });
-      } else {
-        await reverseCommercialPosting({
-          operationId: crypto.randomUUID(),
-          sourceTable: 'payment_certificates',
-          sourceId: cert.id,
-          actor: 'Commercial Controller',
-          reason: reason.trim(),
-        });
-      }
+      } else { throw new Error('Certificate reversal requires the governed desktop backend.'); }
 
       setSuccessMessage(`Certificate reversed and WIR locks released.`);
       await onReload();

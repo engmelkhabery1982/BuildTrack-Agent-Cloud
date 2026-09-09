@@ -671,10 +671,23 @@ export interface ClientInvoice {
 }
 
 /** Approved commercial certificate: the controlled payment summary for one contract. */
+export interface CertificatePartialPayment {
+  payment_id: string;
+  certificate_id: string;
+  payment_date: string;
+  amount: number;
+  reference?: string | null;
+  created_at: string;
+}
+
 export interface PaymentCertificate {
   id: string;
   project_id: string;
   contract_id: string;
+  period_id?: string | null;
+  items?: Array<{ boq_item_id: string; wir_ids: string[]; quantity: number; description?: string; unit?: string; client_selling_rate?: number; subcontract_rate?: number; client_amount?: number; subcontract_amount?: number; amount?: number }>;
+  total_paid_amount?: number;
+  remaining_balance?: number;
   certificate_number: string;
   certificate_number_locked: boolean;
   certificate_type: 'Client' | 'Subcontractor' | string;

@@ -20,7 +20,7 @@ export {
 } from "./reportingPeriodGovernance.ts";
 export * from './dataQuality.ts';
 export { approveSupplierInvoice, settleSupplierInvoicePayment, approvePurchaseOrder, acceptProcurementReceipt, cancelPurchaseOrder, amendPurchaseOrder, reverseSupplierApPosting } from "./supplierAp.ts";
-export { approveCostChange, approveVariation, approvePaymentCertificate, settlePaymentCertificate, reverseCommercialPosting, reverseVariation } from "./commercialWorkflow.ts";
+export { approveCostChange, approveVariation, approvePaymentCertificate, settlePaymentCertificate, reverseCommercialPosting, reverseVariation, createPaymentCertificateDraft, submitPaymentCertificate, approvePaymentCertificateGoverned, recordPartialPayment, reverseCertificateGoverned, getCertificatePartialPayments } from "./commercialWorkflow.ts";
 export { issueReportVersion } from "./reportVersioning.ts";
 export { approveCostPlanVersion } from "./costPlanVersioning.ts";
 export { approveEstimateVersion } from "./estimateVersioning.ts";

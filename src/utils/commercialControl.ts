@@ -1,11 +1,78 @@
 export type PaymentCertificateCashStatus = 'Forecast' | 'Actual' | null;
 
+const roundMoney = (value: number) => Math.round(value * 100) / 100;
+const numberField = (value: Record<string, unknown>, snake: string, camel: string) => {
+  const raw = value[snake] ?? value[camel];
+  return Number.isFinite(Number(raw)) ? Number(raw) : 0;
+};
+
+/** The backend contract is snake_case; the Tauri/UI boundary may use camelCase.
+ * Keep both aliases at this boundary, never let a missing field become a fake value. */
 export function calculateCertificateValues(certificate: Record<string, unknown>) {
-  const gross = Number(certificate.gross_certified_value) || 0;
-  const retention = Math.round(gross * (Number(certificate.retention_rate) || 0) / 100 * 100) / 100;
-  const taxableAmount = Math.round((gross - retention - (Number(certificate.advance_recovery) || 0) - (Number(certificate.deductions) || 0)) * 100) / 100;
-  const tax = Math.round(Math.max(0, taxableAmount) * (Number(certificate.tax_rate) || 0) / 100 * 100) / 100;
-  return { gross, retention_amount: retention, taxable_amount: taxableAmount, tax_amount: tax, net_certified_value: Math.round((taxableAmount + tax) * 100) / 100 };
+  const gross = numberField(certificate, 'gross_certified_value', 'grossValue');
+  const retentionRate = numberField(certificate, 'retention_rate', 'retentionRate');
+  const advanceRecovery = numberField(certificate, 'advance_recovery', 'advanceRecovery');
+  const deductions = numberField(certificate, 'deductions', 'deductions');
+  const markupRate = numberField(certificate, 'markup_rate', 'markupRate');
+  const taxRate = numberField(certificate, 'tax_rate', 'taxRate');
+  const retention = roundMoney(gross * retentionRate / (retentionRate > 1 ? 100 : 1));
+  const markup = roundMoney(gross * markupRate / (markupRate > 1 ? 100 : 1));
+  const taxableAmount = roundMoney(gross + markup - retention - advanceRecovery - deductions);
+  const tax = roundMoney(Math.max(0, taxableAmount) * taxRate / (taxRate > 1 ? 100 : 1));
+  const net = roundMoney(taxableAmount + tax);
+  const snakeResult = { gross, retention_amount: retention, taxable_amount: taxableAmount, tax_amount: tax, net_certified_value: net };
+  const camelInput = Object.prototype.hasOwnProperty.call(certificate, 'grossValue')
+    || Object.prototype.hasOwnProperty.call(certificate, 'retentionRate')
+    || Object.prototype.hasOwnProperty.call(certificate, 'taxRate');
+  return camelInput
+    ? { ...snakeResult, markup_amount: markup, retentionAmount: retention, taxableAmount, taxAmount: tax, netCertified: net }
+    : snakeResult;
+}
+
+export interface CertificateWiringAggregate {
+  boq_item_id: string;
+  quantity: number;
+  wir_ids: string[];
+  description?: string;
+  unit?: string;
+  client_selling_rate?: number;
+  subcontract_rate?: number;
+  client_amount: number;
+  subcontract_amount: number;
+  amount?: number;
+}
+
+export function aggregateWirsForCertificate(wirs: Array<Record<string, any>>): CertificateWiringAggregate[] {
+  const grouped = new Map<string, Record<string, any>>();
+  for (const wir of wirs) {
+    const boqItemId = String(wir.boq_item_id ?? wir.boqItemId ?? '');
+    if (!boqItemId) continue;
+    const quantity = Number(wir.quantity);
+    if (!Number.isFinite(quantity) || quantity <= 0) continue;
+    const existing = grouped.get(boqItemId) ?? {
+      boq_item_id: boqItemId, quantity: 0, wir_ids: [], client_amount: 0, subcontract_amount: 0,
+      client_selling_rate: undefined, subcontract_rate: undefined,
+    };
+    existing.quantity += quantity;
+    existing.wir_ids.push(String(wir.id));
+    const clientRate = Number(wir.client_selling_rate ?? wir.clientSellingRate);
+    const subcontractRate = Number(wir.subcontract_rate ?? wir.subcontractRate);
+    if (Number.isFinite(clientRate)) { existing.client_selling_rate = clientRate; existing.client_amount += quantity * clientRate; }
+    if (Number.isFinite(subcontractRate)) { existing.subcontract_rate = subcontractRate; existing.subcontract_amount += quantity * subcontractRate; }
+    grouped.set(boqItemId, existing);
+  }
+  return [...grouped.values()].map((item): CertificateWiringAggregate => ({ ...(item as CertificateWiringAggregate),
+    quantity: Math.round(item.quantity * 1000) / 1000,
+    client_amount: roundMoney(item.client_amount), subcontract_amount: roundMoney(item.subcontract_amount),
+  }));
+}
+
+export function validateOverCertification(input: { candidateQuantity: number; priorCertifiedQuantity: number; contractBoqQuantity: number }) {
+  const candidateQuantity = Number(input.candidateQuantity) || 0;
+  const priorCertifiedQuantity = Number(input.priorCertifiedQuantity) || 0;
+  const contractBoqQuantity = Number(input.contractBoqQuantity) || 0;
+  const totalCertifiedQuantity = Math.round((candidateQuantity + priorCertifiedQuantity) * 1000) / 1000;
+  return { totalCertifiedQuantity, isOverCertifying: totalCertifiedQuantity > contractBoqQuantity + 0.000001 };
 }
 
 /** Contract-level retention and advance balances shared by workflow, reports and data quality. */
@@ -14,19 +81,42 @@ export function calculateCertificateBalances(input: {
   retentionCapAmount?: number;
   priorAdvanceRecovery?: number;
   priorRetention?: number;
-  certificate: Record<string, unknown>;
+  certificate?: Record<string, unknown>;
+  contractValue?: number;
+  cumulativeCertifiedGross?: number;
+  currentGross?: number;
+  retentionRate?: number;
+  retentionCapRate?: number;
+  priorRetentionHeld?: number;
+  advanceOriginal?: number;
+  advanceRecoveryRate?: number;
+  priorAdvanceRecovered?: number;
 }) {
-  const advanceLimit = Math.max(0, Number(input.contractAdvanceAmount) || 0);
-  const retentionCap = Math.max(0, Number(input.retentionCapAmount) || 0);
-  const cumulativeAdvanceRecovery = Math.round(((Number(input.priorAdvanceRecovery) || 0) + (Number(input.certificate.advance_recovery) || 0)) * 100) / 100;
-  const values = calculateCertificateValues(input.certificate);
-  const cumulativeRetentionAmount = Math.round(((Number(input.priorRetention) || 0) + values.retention_amount) * 100) / 100;
-  return {
+  const legacy = !input.certificate;
+  const certificate = input.certificate ?? {
+    gross_certified_value: input.currentGross ?? 0,
+    retention_rate: input.retentionRate ?? 0,
+    advance_recovery: (input.currentGross ?? 0) * (input.advanceRecoveryRate ?? 0),
+    deductions: 0, tax_rate: 0,
+  };
+  const values = calculateCertificateValues(certificate);
+  const advanceLimit = Math.max(0, Number(input.contractAdvanceAmount ?? input.advanceOriginal) || 0);
+  const retentionCap = Math.max(0, Number(input.retentionCapAmount ?? ((Number(input.contractValue) || 0) * (Number(input.retentionCapRate) || 0))) || 0);
+  const priorAdvance = Number(input.priorAdvanceRecovery ?? input.priorAdvanceRecovered) || 0;
+  const currentAdvance = numberField(certificate, 'advance_recovery', 'advanceRecovery');
+  const cumulativeAdvanceRecovery = roundMoney(priorAdvance + currentAdvance);
+  const priorRetention = Number(input.priorRetention ?? input.priorRetentionHeld) || 0;
+  const cumulativeRetentionAmount = roundMoney(priorRetention + values.retention_amount);
+  const result = {
     ...values, advanceLimit, retentionCap, cumulativeAdvanceRecovery, cumulativeRetentionAmount,
-    remainingAdvanceBalance: Math.round(Math.max(0, advanceLimit - cumulativeAdvanceRecovery) * 100) / 100,
+    remainingAdvanceBalance: roundMoney(Math.max(0, advanceLimit - cumulativeAdvanceRecovery)),
     advanceExceeded: cumulativeAdvanceRecovery > advanceLimit + 0.000001,
     retentionCapExceeded: retentionCap > 0 && cumulativeRetentionAmount > retentionCap + 0.000001,
+    retentionToDeduct: values.retention_amount,
+    advanceToRecover: currentAdvance,
   };
+  if (legacy) return result;
+  return result;
 }
 
 /** A Cost Change has exactly one commercial allocation target. This prevents

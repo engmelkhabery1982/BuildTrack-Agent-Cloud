@@ -25,6 +25,7 @@ import { CostVarianceDrillDownModal } from '@/components/CostVarianceDrillDownMo
 import { LaborTimesheetModal } from '@/components/LaborTimesheetModal';
 import { EquipmentLogModal } from '@/components/EquipmentLogModal';
 import { ClaimAssessmentModal } from '@/components/ClaimAssessmentModal';
+import { PaymentCertificateWorkbench } from '@/components/PaymentCertificateWorkbench';
 import { IntegratedProjectControlsCockpit } from '@/components/IntegratedProjectControlsCockpit';
 import { ExternalPortalView } from '@/components/ExternalPortalView';
 import { VarianceActionRegisterView } from '@/components/VarianceActionRegisterView';
@@ -3715,6 +3716,19 @@ function AppWorkspace() {
         throw new Error(`Budget availability control blocked this ${postingType}: SOV ${line.sov_line_code || line.id} has ${availability.availableBudget.toLocaleString()} available; this posting would exceed the approved budget by ${Math.abs(availability.projectedAvailableBudget).toLocaleString()}. Approve a Cost Change or reduce the posting first.`);
       }
     };
+
+    if (activeView === 'paymentCertificates') {
+      return <PaymentCertificateWorkbench
+        projects={data.projects as Project[]}
+        contracts={data.contracts}
+        boqItems={data.boqItems}
+        wirEntries={data.wirEntries}
+        paymentCertificates={data.paymentCertificates}
+        reportingPeriods={data.reportingPeriods}
+        sessionUser={sessionUser}
+        onReload={async () => { await data.reload(); }}
+      />;
+    }
 
     return (
       <>

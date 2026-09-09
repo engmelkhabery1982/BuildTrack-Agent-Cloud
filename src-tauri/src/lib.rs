@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use tauri::Manager;
 
 mod claims_workflow;
+mod certificate_workflow;
 mod commercial_workflow;
 mod cost_plan_versioning;
 mod equipment_log;
@@ -194,6 +195,55 @@ async fn reverse_variation(
         .map_err(|error| error.to_string())?
         .join("buildtrack.db");
     commercial_workflow::reverse_variation(&path, request).await
+}
+
+#[tauri::command]
+async fn create_payment_certificate_draft(
+    app: tauri::AppHandle,
+    request: certificate_workflow::CreateCertificateRequest,
+) -> Result<certificate_workflow::CertificateDraftResult, String> {
+    let path = app.path().app_config_dir().map_err(|error| error.to_string())?.join("buildtrack.db");
+    certificate_workflow::create_payment_certificate_draft(&path, request).await
+}
+#[tauri::command]
+async fn submit_payment_certificate(
+    app: tauri::AppHandle,
+    request: certificate_workflow::SubmitCertificateRequest,
+) -> Result<certificate_workflow::CertificateOperationResult, String> {
+    let path = app.path().app_config_dir().map_err(|error| error.to_string())?.join("buildtrack.db");
+    certificate_workflow::submit_payment_certificate(&path, request).await
+}
+#[tauri::command]
+async fn approve_payment_certificate_governed(
+    app: tauri::AppHandle,
+    request: certificate_workflow::ApproveCertificateGovernedRequest,
+) -> Result<certificate_workflow::CertificateOperationResult, String> {
+    let path = app.path().app_config_dir().map_err(|error| error.to_string())?.join("buildtrack.db");
+    certificate_workflow::approve_payment_certificate_governed(&path, request).await
+}
+#[tauri::command]
+async fn record_partial_payment(
+    app: tauri::AppHandle,
+    request: certificate_workflow::PartialPaymentRequest,
+) -> Result<certificate_workflow::CertificateOperationResult, String> {
+    let path = app.path().app_config_dir().map_err(|error| error.to_string())?.join("buildtrack.db");
+    certificate_workflow::record_partial_payment(&path, request).await
+}
+#[tauri::command]
+async fn reverse_certificate_governed(
+    app: tauri::AppHandle,
+    request: certificate_workflow::ReverseCertificateRequest,
+) -> Result<certificate_workflow::CertificateOperationResult, String> {
+    let path = app.path().app_config_dir().map_err(|error| error.to_string())?.join("buildtrack.db");
+    certificate_workflow::reverse_certificate_governed(&path, request).await
+}
+#[tauri::command]
+async fn get_certificate_partial_payments(
+    app: tauri::AppHandle,
+    request: certificate_workflow::GetPartialPaymentsRequest,
+) -> Result<Vec<certificate_workflow::PartialPaymentRecord>, String> {
+    let path = app.path().app_config_dir().map_err(|error| error.to_string())?.join("buildtrack.db");
+    certificate_workflow::get_certificate_partial_payments(&path, request.certificate_id).await
 }
 
 #[tauri::command]
@@ -3563,6 +3613,41 @@ pub fn run() {
             "#,
             kind: tauri_plugin_sql::MigrationKind::Up,
         },
+        tauri_plugin_sql::Migration {
+            version: 76,
+            description: "governed_payment_certificate_wir_locks_and_partial_payments",
+            sql: r#"
+              CREATE TABLE IF NOT EXISTS certificate_mutation_guard (
+                operation_id TEXT PRIMARY KEY, created_at TEXT NOT NULL
+              );
+              CREATE TABLE IF NOT EXISTS wir_certification_lock (
+                id TEXT PRIMARY KEY, certificate_id TEXT NOT NULL, wir_id TEXT NOT NULL,
+                period_id TEXT NOT NULL, boq_item_id TEXT NOT NULL, certified_quantity REAL NOT NULL,
+                certified_amount REAL NOT NULL, created_at TEXT NOT NULL,
+                UNIQUE(wir_id, period_id, boq_item_id),
+                FOREIGN KEY (certificate_id) REFERENCES payment_certificates(id) ON DELETE RESTRICT
+              );
+              CREATE INDEX IF NOT EXISTS idx_wir_certification_lock_certificate ON wir_certification_lock(certificate_id);
+              CREATE TABLE IF NOT EXISTS certificate_lock_reversals (
+                reversal_id TEXT PRIMARY KEY, certificate_id TEXT NOT NULL, wir_id TEXT NOT NULL,
+                operation_id TEXT NOT NULL, created_at TEXT NOT NULL, reason TEXT NOT NULL,
+                FOREIGN KEY (certificate_id) REFERENCES payment_certificates(id) ON DELETE RESTRICT
+              );
+              CREATE TABLE IF NOT EXISTS certificate_partial_payments (
+                payment_id TEXT PRIMARY KEY, certificate_id TEXT NOT NULL, payment_date TEXT NOT NULL,
+                amount REAL NOT NULL CHECK(amount > 0), reference TEXT, created_at TEXT NOT NULL,
+                UNIQUE(certificate_id, payment_id),
+                FOREIGN KEY (certificate_id) REFERENCES payment_certificates(id) ON DELETE RESTRICT
+              );
+              CREATE TRIGGER IF NOT EXISTS certificate_partial_payment_immutable_update
+              BEFORE UPDATE ON certificate_partial_payments
+              BEGIN SELECT RAISE(ABORT, 'Partial payment ledger is append-only.'); END;
+              CREATE TRIGGER IF NOT EXISTS certificate_partial_payment_immutable_delete
+              BEFORE DELETE ON certificate_partial_payments
+              BEGIN SELECT RAISE(ABORT, 'Partial payment ledger is append-only.'); END;
+            "#,
+            kind: tauri_plugin_sql::MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()
@@ -3589,6 +3674,12 @@ pub fn run() {
             approve_cost_change,
             approve_variation,
             approve_payment_certificate,
+            create_payment_certificate_draft,
+            submit_payment_certificate,
+            approve_payment_certificate_governed,
+            record_partial_payment,
+            reverse_certificate_governed,
+            get_certificate_partial_payments,
             settle_payment_certificate,
             reverse_commercial_posting,
             reverse_variation,
