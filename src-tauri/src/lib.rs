@@ -3629,6 +3629,16 @@ pub fn run() {
                 operation_id TEXT PRIMARY KEY, certificate_id TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL,
                 FOREIGN KEY (certificate_id) REFERENCES payment_certificates(id) ON DELETE RESTRICT
               );
+              CREATE TRIGGER IF NOT EXISTS payment_certificate_governed_update_guard
+              BEFORE UPDATE ON payment_certificates
+              WHEN json_extract(OLD.payload,'$.status') IN ('Submitted','Approved','Partially Paid','Paid','Reversed')
+                AND NOT EXISTS (SELECT 1 FROM certificate_mutation_guard WHERE operation_id LIKE 'internal:payment_certificates:%')
+              BEGIN SELECT RAISE(ABORT, 'Governed payment certificate updates require a lifecycle transaction.'); END;
+              CREATE TRIGGER IF NOT EXISTS payment_certificate_governed_delete_guard
+              BEFORE DELETE ON payment_certificates
+              WHEN json_extract(OLD.payload,'$.status') IN ('Submitted','Approved','Partially Paid','Paid','Reversed')
+                AND NOT EXISTS (SELECT 1 FROM certificate_mutation_guard WHERE operation_id LIKE 'internal:payment_certificates:%')
+              BEGIN SELECT RAISE(ABORT, 'Governed payment certificate deletion is forbidden.'); END;
               CREATE TABLE IF NOT EXISTS wir_certification_lock (
                 id TEXT PRIMARY KEY, certificate_id TEXT NOT NULL, wir_id TEXT NOT NULL,
                 period_id TEXT NOT NULL, boq_item_id TEXT NOT NULL, stream TEXT NOT NULL,

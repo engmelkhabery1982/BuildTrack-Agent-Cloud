@@ -488,7 +488,7 @@ async fn check_over_certification(
                     &brow.try_get::<String, _>("payload").map_err(|e| e.to_string())?,
                 )
                 .map_err(|e| e.to_string())?;
-                let contract_boq_qty = n(&bpayload, "quantity");
+                let contract_boq_qty = term(&bpayload, &["revised_quantity", "revisedQuantity", "quantity"]).unwrap_or(0.0);
 
                 if contract_boq_qty > 0.0 {
                     let prior_certified_qty: f64 = sqlx::query_scalar(
@@ -621,11 +621,19 @@ pub async fn create_payment_certificate_draft(
             let boq_item_id = s(item, "boq_item_id");
             let previous: f64 = sqlx::query_scalar("SELECT COALESCE(SUM(certified_quantity),0) FROM wir_certification_lock WHERE boq_item_id=? AND stream=? AND reversed_at IS NULL")
                 .bind(&boq_item_id).bind(stream).fetch_one(&mut *tx).await.map_err(|e| e.to_string())?;
+            let previous_value: f64 = sqlx::query_scalar("SELECT COALESCE(SUM(certified_amount),0) FROM wir_certification_lock WHERE boq_item_id=? AND stream=? AND reversed_at IS NULL")
+                .bind(&boq_item_id).bind(stream).fetch_one(&mut *tx).await.map_err(|e| e.to_string())?;
             let current = n(item, "quantity");
-            if let Some(obj) = item.as_object_mut() { obj.insert("previous_quantity".into(), json!(previous)); obj.insert("current_quantity".into(), json!(current)); obj.insert("cumulative_quantity".into(), json!(previous + current)); }
+            let current_value = n(item, "amount");
+            if let Some(obj) = item.as_object_mut() {
+                obj.insert("previous_quantity".into(), json!(previous)); obj.insert("current_quantity".into(), json!(current)); obj.insert("cumulative_quantity".into(), json!(previous + current));
+                obj.insert("previous_value".into(), json!(money(previous_value))); obj.insert("current_value".into(), json!(money(current_value))); obj.insert("cumulative_value".into(), json!(money(previous_value + current_value)));
+            }
         }
         let items = aggregated;
         let line_count = items.len();
+        let create_scope = Scope { project_id: r.project_id.clone(), contract_id: Some(r.contract_id.clone()), boq_header_id: None, boq_item_id: None, parent_main_project_id: None, parent_main_contract_id: parent_contract.clone() };
+        check_over_certification(&mut tx, &create_scope, &id, &Value::Array(items.clone())).await?;
         let certificate_number = format!("PC-{}-{}", r.contract_id, stamp());
         let tracking_id = format!("tracking:{}", id);
         let invoice_id = format!("invoice:{}", id);

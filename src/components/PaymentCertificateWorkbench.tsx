@@ -142,7 +142,7 @@ export const PaymentCertificateWorkbench: React.FC<PaymentCertificateWorkbenchPr
     const warnings: string[] = [];
     aggregatedItems.forEach((item) => {
       const linkedBoq = boqItems.find((b) => b.id === item.boq_item_id);
-      const contractQty = Number(linkedBoq?.quantity);
+      const contractQty = Number((linkedBoq as any)?.revised_quantity ?? (linkedBoq as any)?.revisedQuantity ?? (linkedBoq as any)?.quantity);
       if (!Number.isFinite(contractQty) || contractQty <= 0) { warnings.push(`BOQ Item ${item.boq_item_id}: Requires setup because revised BOQ quantity is unavailable.`); return; }
       const priorCertified = linkedBoq?.verified_quantity || 0;
       const check = validateOverCertification({
@@ -173,9 +173,8 @@ export const PaymentCertificateWorkbench: React.FC<PaymentCertificateWorkbenchPr
       return;
     }
     if (overCertWarnings.length > 0) {
-      if (!window.confirm('Over-certification warnings detected! Do you want to proceed with submission?')) {
-        return;
-      }
+      setErrorMessage(`Cannot submit payment certificate: ${overCertWarnings.join(' ')}`);
+      return;
     }
 
     setLoadingAction(true);
@@ -361,7 +360,13 @@ export const PaymentCertificateWorkbench: React.FC<PaymentCertificateWorkbenchPr
             className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
           >
             {contracts
-              .filter((c) => !selectedProjectId || c.project_id === selectedProjectId)
+              .filter((c) => {
+                const contract: any = c;
+                const payload = contract.payload || contract;
+                const parent = contract.parent_main_contract_id || contract.parentMainContractId || payload.parent_main_contract_id || payload.parentMainContractId;
+                const matchesType = certType === 'Client' ? !parent : Boolean(parent);
+                return (!selectedProjectId || c.project_id === selectedProjectId) && matchesType;
+              })
               .map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.contract_number || c.id} - {c.title || c.contract_type}
@@ -576,9 +581,9 @@ export const PaymentCertificateWorkbench: React.FC<PaymentCertificateWorkbenchPr
                 </tr>
               ) : (
                 filteredCertificates.map((cert) => {
-                  const netValue = cert.gross_certified_value * (1 - cert.retention_rate) - cert.advance_recovery - cert.deductions;
+                  const netValue = (cert as any).net_certified_value ?? (cert as any).netCertifiedValue;
                   const totalPaid = cert.total_paid_amount || 0;
-                  const remaining = cert.remaining_balance ?? netValue;
+                  const remaining = cert.remaining_balance ?? (typeof netValue === 'number' ? netValue - totalPaid : undefined);
 
                   return (
                     <tr key={cert.id} className="hover:bg-slate-50">
