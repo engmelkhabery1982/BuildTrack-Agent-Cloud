@@ -3625,6 +3625,10 @@ pub fn run() {
                 command TEXT NOT NULL, result_json TEXT NOT NULL, created_at TEXT NOT NULL,
                 FOREIGN KEY (certificate_id) REFERENCES payment_certificates(id) ON DELETE RESTRICT
               );
+              CREATE TABLE IF NOT EXISTS certificate_create_operations (
+                operation_id TEXT PRIMARY KEY, certificate_id TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL,
+                FOREIGN KEY (certificate_id) REFERENCES payment_certificates(id) ON DELETE RESTRICT
+              );
               CREATE TABLE IF NOT EXISTS wir_certification_lock (
                 id TEXT PRIMARY KEY, certificate_id TEXT NOT NULL, wir_id TEXT NOT NULL,
                 period_id TEXT NOT NULL, boq_item_id TEXT NOT NULL, stream TEXT NOT NULL,

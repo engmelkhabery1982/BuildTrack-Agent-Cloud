@@ -190,6 +190,7 @@ export const PaymentCertificateWorkbench: React.FC<PaymentCertificateWorkbenchPr
         throw new Error('Payment certificate creation requires the governed desktop backend.');
       }
       const draft = await createPaymentCertificateDraft({
+        operationId: crypto.randomUUID(),
         projectId: selectedProjectId,
         contractId: selectedContractId,
         periodId: selectedPeriodId,

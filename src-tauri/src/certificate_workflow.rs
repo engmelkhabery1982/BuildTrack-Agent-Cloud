@@ -17,6 +17,7 @@ use std::path::Path;
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateCertificateRequest {
+    pub operation_id: String,
     pub project_id: String,
     pub contract_id: String,
     pub period_id: String,
@@ -529,6 +530,7 @@ pub async fn create_payment_certificate_draft(
     path: &Path,
     r: CreateCertificateRequest,
 ) -> Result<CertificateDraftResult, String> {
+    if r.operation_id.trim().is_empty() { return Err("Create certificate requires operation ID.".into()); }
     if r.project_id.trim().is_empty() || r.contract_id.trim().is_empty() || r.period_id.trim().is_empty() {
         return Err("Project, contract and reporting period are required.".into());
     }
@@ -537,6 +539,13 @@ pub async fn create_payment_certificate_draft(
     }
     if r.wir_ids.is_empty() { return Err("At least one WIR is required.".into()); }
     let mut tx = db(path).await?.begin().await.map_err(|e| e.to_string())?;
+    if let Some(row) = sqlx::query("SELECT certificate_id FROM certificate_create_operations WHERE operation_id=?").bind(&r.operation_id).fetch_optional(&mut *tx).await.map_err(|e| e.to_string())? {
+        let certificate_id: String = row.try_get("certificate_id").map_err(|e| e.to_string())?;
+        let (_, existing) = scope_doc(&mut tx, "payment_certificates", &certificate_id).await?;
+        let result = CertificateDraftResult { certificate_id, status: s(&existing, "status"), line_count: existing.get("items").and_then(Value::as_array).map(Vec::len).unwrap_or(0), gross_certified_value: n(&existing, "gross_certified_value") };
+        tx.rollback().await.map_err(|e| e.to_string())?;
+        return Ok(result);
+    }
     let outcome = async {
         let contract = sqlx::query("SELECT project_id,parent_main_contract_id,payload FROM contracts WHERE id=?")
             .bind(&r.contract_id).fetch_optional(&mut *tx).await.map_err(|e| e.to_string())?
@@ -632,6 +641,8 @@ pub async fn create_payment_certificate_draft(
         sqlx::query(&invoice_sql).bind(&invoice_id).bind(stamp()).bind(&r.project_id).bind(&r.contract_id).bind(invoice_payload.to_string()).execute(&mut *tx).await.map_err(|e| e.to_string())?;
         let tracking_sql = format!("INSERT INTO {tracking_table}(id,created_at,project_id,contract_id,payload) VALUES (?,?,?,?,?)");
         sqlx::query(&tracking_sql).bind(&tracking_id).bind(stamp()).bind(&r.project_id).bind(&r.contract_id).bind(tracking_payload.to_string()).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+        sqlx::query("INSERT INTO certificate_create_operations(operation_id,certificate_id,created_at) VALUES (?,?,?)")
+            .bind(&r.operation_id).bind(&id).bind(stamp()).execute(&mut *tx).await.map_err(|e| e.to_string())?;
         guard(&mut tx, &format!("create:{id}"), false).await?;
         Ok::<CertificateDraftResult,String>(CertificateDraftResult { certificate_id: id, status: "Draft".into(), line_count, gross_certified_value: gross })
     }.await;
@@ -745,7 +756,9 @@ pub async fn approve_payment_certificate_governed(
         let contract_row = sqlx::query("SELECT payload FROM contracts WHERE id=?").bind(&contract_id).fetch_one(&mut *tx).await.map_err(|e| e.to_string())?;
         let contract_payload: Value = serde_json::from_str(&contract_row.try_get::<String,_>("payload").map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
         let retention_rate = term(&contract_payload, &["retention_rate", "retentionRate"]).ok_or("Requires setup: contract retention rate is missing.")?;
+        let retention_cap = term(&contract_payload, &["retention_cap_amount", "retentionCapAmount"]);
         let advance_rate = term(&contract_payload, &["advance_recovery_rate", "advanceRecoveryRate"]).unwrap_or(0.0);
+        let advance_original = term(&contract_payload, &["advance_original", "advanceOriginal"]);
         let tax_rate = term(&contract_payload, &["tax_rate", "taxRate"]).unwrap_or(0.0);
         let markup_rate = term(&contract_payload, &["markup_rate", "markupRate"]).unwrap_or(0.0);
         let deductions = term(&contract_payload, &["deductions", "deduction_amount"]).unwrap_or(0.0);
@@ -837,8 +850,14 @@ pub async fn approve_payment_certificate_governed(
             }
         }
 
-        let retention = money(gross * retention_rate / if retention_rate > 1.0 { 100.0 } else { 1.0 });
-        let advance_recovery = money(gross * advance_rate / if advance_rate > 1.0 { 100.0 } else { 1.0 });
+        let prior_retention: f64 = sqlx::query_scalar("SELECT COALESCE(SUM(json_extract(payload,'$.retention_amount')),0) FROM payment_certificates WHERE contract_id=? AND json_extract(payload,'$.certificate_type')=? AND id<>? AND json_extract(payload,'$.status') IN ('Approved','Partially Paid','Paid')")
+            .bind(&contract_id).bind(&certificate_type).bind(&r.certificate_id).fetch_one(&mut *tx).await.map_err(|e| e.to_string())?;
+        let retention_room = retention_cap.map(|cap| (cap - prior_retention).max(0.0)).unwrap_or(f64::MAX);
+        let retention = money((gross * retention_rate / if retention_rate > 1.0 { 100.0 } else { 1.0 }).min(retention_room));
+        let prior_advance: f64 = sqlx::query_scalar("SELECT COALESCE(SUM(json_extract(payload,'$.advance_recovery')),0) FROM payment_certificates WHERE contract_id=? AND json_extract(payload,'$.certificate_type')=? AND id<>? AND json_extract(payload,'$.status') IN ('Approved','Partially Paid','Paid')")
+            .bind(&contract_id).bind(&certificate_type).bind(&r.certificate_id).fetch_one(&mut *tx).await.map_err(|e| e.to_string())?;
+        let advance_room = advance_original.map(|original| (original - prior_advance).max(0.0)).unwrap_or(f64::MAX);
+        let advance_recovery = money((gross * advance_rate / if advance_rate > 1.0 { 100.0 } else { 1.0 }).min(advance_room));
         let taxable = money(gross - retention - advance_recovery - deductions);
         if taxable < -0.000001 {
             return Err("Retention, advance recovery and deductions cannot exceed gross certified value.".into());
