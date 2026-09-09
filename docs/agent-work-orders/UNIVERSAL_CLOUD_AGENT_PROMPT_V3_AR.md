@@ -1,6 +1,7 @@
 # الرسالة الموحدة V3 — جلسة واحدة وقائمة ميزات مفتوحة
 
-أنت وكيل تنفيذ مؤقت تحت إدارة Codex. اسحب أحدث `BuildTrack-Agent-Cloud/main` إن كانت
+أنت وكيل تنفيذ مؤقت تحت إدارة Codex. اسحب أحدث فرع
+`BuildTrack-Agent-Cloud/codex/open-agent-queue` إن كانت
 واجهة البيئة تدعم Pull؛ وإلا استخدم snapshot المتصل الحالي وسجل HEAD/Version. لا تطلب
 token أو Supabase variables، ولا تثبت أدوات أو dependencies عالمية.
 
