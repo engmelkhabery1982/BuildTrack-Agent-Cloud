@@ -59,7 +59,6 @@ pub struct ApproveCertificateGovernedRequest {
     pub certificate_id: String,
     pub actor: String,
     pub approved_at: String,
-    pub wir_locks: Option<Vec<WirLockItemInput>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -150,6 +149,10 @@ fn s(v: &Value, k: &str) -> String {
 
 fn money(v: f64) -> f64 {
     (v * 100.0).round() / 100.0
+}
+
+fn term(v: &Value, keys: &[&str]) -> Option<f64> {
+    keys.iter().find_map(|key| v.get(*key).and_then(Value::as_f64))
 }
 
 async fn db(path: &Path) -> Result<SqlitePool, String> {
@@ -298,15 +301,7 @@ async fn cash(
         format!("payment_certificate_{}:{}", kind.to_lowercase(), source)
     };
 
-    if partial_id.is_none() {
-        sqlx::query("DELETE FROM cash_flow WHERE json_extract(payload,'$.source_type') LIKE 'payment_certificate_%' AND json_extract(payload,'$.source_id')=?")
-            .bind(source)
-            .execute(&mut **tx)
-            .await
-            .map_err(|e| e.to_string())?;
-    }
-
-    if amount.abs() < 0.000001 {
+    if amount.abs() < 0.000001 && kind != "Reversed" {
         return Ok(());
     }
 
@@ -381,21 +376,27 @@ async fn synchronize_invoice_tracking(
         _ => ("Generated", "Unpaid"),
     };
 
-    let tracking_update = format!("UPDATE {tracking_table} SET payload=json_set(payload,'$.status',?,'$.payment_status',?,'$.payment_date',?) WHERE id=?");
+    let paid_amount = n(certificate, "total_paid_amount");
+    let remaining_amount = n(certificate, "remaining_balance");
+    let tracking_update = format!("UPDATE {tracking_table} SET payload=json_set(payload,'$.status',?,'$.payment_status',?,'$.payment_date',?,'$.paid_amount',?,'$.remaining_amount',?) WHERE id=?");
     sqlx::query(&tracking_update)
         .bind(status)
         .bind(payment_status)
         .bind(payment_date)
+        .bind(paid_amount)
+        .bind(remaining_amount)
         .bind(&tracking_id)
         .execute(&mut **tx)
         .await
         .map_err(|e| e.to_string())?;
 
-    let invoice_update = format!("UPDATE {invoice_table} SET payload=json_set(payload,'$.status',?,'$.payment_status',?,'$.payment_date',?) WHERE json_extract(payload,'$.invoice_number')=?");
+    let invoice_update = format!("UPDATE {invoice_table} SET payload=json_set(payload,'$.status',?,'$.payment_status',?,'$.payment_date',?,'$.paid_amount',?,'$.remaining_amount',?) WHERE json_extract(payload,'$.invoice_number')=?");
     sqlx::query(&invoice_update)
         .bind(status)
         .bind(payment_status)
         .bind(payment_date)
+        .bind(paid_amount)
+        .bind(remaining_amount)
         .bind(&number)
         .execute(&mut **tx)
         .await
@@ -483,7 +484,7 @@ pub async fn create_payment_certificate_draft(
     if r.wir_ids.is_empty() { return Err("At least one WIR is required.".into()); }
     let mut tx = db(path).await?.begin().await.map_err(|e| e.to_string())?;
     let outcome = async {
-        let contract = sqlx::query("SELECT project_id,parent_main_contract_id FROM contracts WHERE id=?")
+        let contract = sqlx::query("SELECT project_id,parent_main_contract_id,payload FROM contracts WHERE id=?")
             .bind(&r.contract_id).fetch_optional(&mut *tx).await.map_err(|e| e.to_string())?
             .ok_or("Selected contract was not found.")?;
         let contract_project: String = contract.try_get("project_id").map_err(|e| e.to_string())?;
@@ -493,7 +494,16 @@ pub async fn create_payment_certificate_draft(
             .ok_or("Reporting period was not found.")?;
         let period_project: String = period.try_get("project_id").map_err(|e| e.to_string())?;
         if period_project != r.project_id { return Err("Reporting period is outside the selected project.".into()); }
+        let period_payload: Value = serde_json::from_str(&period.try_get::<String,_>("payload").map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+        if matches!(s(&period_payload, "status").as_str(), "Locked" | "Closed") || period_payload.get("locked").and_then(Value::as_bool).unwrap_or(false) { return Err("Reporting period is locked.".into()); }
         let parent_contract: Option<String> = contract.try_get("parent_main_contract_id").map_err(|e| e.to_string())?;
+        let contract_payload: Value = serde_json::from_str(&contract.try_get::<String,_>("payload").map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+        let retention_rate = term(&contract_payload, &["retention_rate", "retentionRate"]).ok_or("Requires setup: contract retention rate is missing.")?;
+        let tax_rate = term(&contract_payload, &["tax_rate", "taxRate"]).ok_or("Requires setup: contract tax rate is missing.")?;
+        let advance_rate = term(&contract_payload, &["advance_recovery_rate", "advanceRecoveryRate"]).unwrap_or(0.0);
+        let markup_rate = term(&contract_payload, &["markup_rate", "markupRate"]).unwrap_or(0.0);
+        let retention_cap_amount = term(&contract_payload, &["retention_cap_amount", "retentionCapAmount"]);
+        let advance_original = term(&contract_payload, &["advance_original", "advanceOriginal"]);
         if r.certificate_type == "Client" && parent_contract.is_some() { return Err("Client certificates require the main contract.".into()); }
         if r.certificate_type == "Subcontractor" && parent_contract.is_none() { return Err("Subcontractor certificates require a subcontract.".into()); }
         let id = format!("pc:{}:{}", r.contract_id, stamp());
@@ -524,12 +534,52 @@ pub async fn create_payment_certificate_draft(
             let amount = money(quantity * rate); gross += amount;
             items.push(json!({"boq_item_id": boq_id, "wir_ids": [wir_id], "quantity": quantity, "rate": rate, "rate_source": format!("boq_items.payload.{rate_key}"), "amount": amount}));
         }
-        let payload = json!({"id": id, "project_id": r.project_id, "contract_id": r.contract_id, "period_id": r.period_id, "certificate_type": r.certificate_type, "status": "Draft", "items": items, "gross_certified_value": money(gross), "created_at": stamp()});
+        let gross = money(gross);
+        let retention_amount = money(gross * retention_rate / if retention_rate > 1.0 { 100.0 } else { 1.0 });
+        let advance_recovery = money(gross * advance_rate / if advance_rate > 1.0 { 100.0 } else { 1.0 });
+        let taxable = money(gross + money(gross * markup_rate / if markup_rate > 1.0 { 100.0 } else { 1.0 }) - retention_amount - advance_recovery);
+        let tax_amount = money(taxable.max(0.0) * tax_rate / if tax_rate > 1.0 { 100.0 } else { 1.0 });
+        let net = money(taxable + tax_amount);
+        let stream = if r.certificate_type == "Client" { "ClientRevenue" } else { "SubcontractEntitlement" };
+        let mut aggregated: Vec<Value> = Vec::new();
+        for item in items {
+            let item_boq = s(&item, "boq_item_id");
+            if let Some(existing) = aggregated.iter_mut().find(|candidate| s(candidate, "boq_item_id") == item_boq) {
+                let quantity = n(existing, "quantity") + n(&item, "quantity");
+                let amount = n(existing, "amount") + n(&item, "amount");
+                if let Some(obj) = existing.as_object_mut() {
+                    obj.insert("quantity".into(), json!(quantity)); obj.insert("amount".into(), json!(money(amount)));
+                    let new_ids = item.get("wir_ids").and_then(Value::as_array).cloned().unwrap_or_default();
+                    if let Some(ids) = obj.get_mut("wir_ids").and_then(Value::as_array_mut) { ids.extend(new_ids); }
+                }
+            } else { aggregated.push(item); }
+        }
+        for item in &mut aggregated {
+            let boq_item_id = s(item, "boq_item_id");
+            let previous: f64 = sqlx::query_scalar("SELECT COALESCE(SUM(certified_quantity),0) FROM wir_certification_lock WHERE boq_item_id=? AND stream=? AND reversed_at IS NULL")
+                .bind(&boq_item_id).bind(stream).fetch_one(&mut *tx).await.map_err(|e| e.to_string())?;
+            let current = n(item, "quantity");
+            if let Some(obj) = item.as_object_mut() { obj.insert("previous_quantity".into(), json!(previous)); obj.insert("current_quantity".into(), json!(current)); obj.insert("cumulative_quantity".into(), json!(previous + current)); }
+        }
+        let items = aggregated;
+        let line_count = items.len();
+        let certificate_number = format!("PC-{}-{}", r.contract_id, stamp());
+        let tracking_id = format!("tracking:{}", id);
+        let invoice_id = format!("invoice:{}", id);
+        let invoice_number = format!("INV-{}", certificate_number);
+        let tracking_table = if r.certificate_type == "Client" { "client_invoice_tracking" } else { "subcontractor_invoice_tracking" };
+        let invoice_table = if r.certificate_type == "Client" { "client_invoices" } else { "subcontractor_invoices" };
+        let payload = json!({"id": id, "project_id": r.project_id, "contract_id": r.contract_id, "period_id": r.period_id, "certificate_type": r.certificate_type, "certificate_number": certificate_number, "invoice_tracking_id": tracking_id, "status": "Draft", "items": items, "gross_certified_value": gross, "retention_rate": retention_rate, "retention_amount": retention_amount, "advance_recovery_rate": advance_rate, "advance_recovery": advance_recovery, "markup_rate": markup_rate, "tax_rate": tax_rate, "tax_amount": tax_amount, "net_certified_value": net, "retention_cap_amount": retention_cap_amount, "advance_original": advance_original, "created_at": stamp()});
+        let invoice_payload = json!({"id": invoice_id, "invoice_number": invoice_number, "certificate_id": id, "certificate_type": r.certificate_type, "status": "Draft", "payment_status": "Unpaid", "amount": net, "paid_amount": 0.0, "remaining_amount": net, "invoice_date": stamp()});
+        let tracking_payload = json!({"id": tracking_id, "invoice_id": invoice_id, "invoice_number": invoice_number, "certificate_id": id, "status": "Generated", "payment_status": "Unpaid", "paid_amount": 0.0, "remaining_amount": net});
         guard(&mut tx, &format!("create:{id}"), true).await?;
-        sqlx::query("INSERT INTO payment_certificates(id,created_at,project_id,contract_id,payload) VALUES (?,?,?,?,?)")
-            .bind(&id).bind(stamp()).bind(&r.project_id).bind(&r.contract_id).bind(payload.to_string()).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+        sqlx::query("INSERT INTO payment_certificates(id,created_at,project_id,contract_id,payload) VALUES (?,?,?,?,?)").bind(&id).bind(stamp()).bind(&r.project_id).bind(&r.contract_id).bind(payload.to_string()).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+        let invoice_sql = format!("INSERT INTO {invoice_table}(id,created_at,project_id,contract_id,payload) VALUES (?,?,?,?,?)");
+        sqlx::query(&invoice_sql).bind(&invoice_id).bind(stamp()).bind(&r.project_id).bind(&r.contract_id).bind(invoice_payload.to_string()).execute(&mut *tx).await.map_err(|e| e.to_string())?;
+        let tracking_sql = format!("INSERT INTO {tracking_table}(id,created_at,project_id,contract_id,payload) VALUES (?,?,?,?,?)");
+        sqlx::query(&tracking_sql).bind(&tracking_id).bind(stamp()).bind(&r.project_id).bind(&r.contract_id).bind(tracking_payload.to_string()).execute(&mut *tx).await.map_err(|e| e.to_string())?;
         guard(&mut tx, &format!("create:{id}"), false).await?;
-        Ok::<CertificateDraftResult,String>(CertificateDraftResult { certificate_id: id, status: "Draft".into(), line_count: r.wir_ids.len(), gross_certified_value: money(gross) })
+        Ok::<CertificateDraftResult,String>(CertificateDraftResult { certificate_id: id, status: "Draft".into(), line_count, gross_certified_value: gross })
     }.await;
     match outcome { Ok(result) => { tx.commit().await.map_err(|e| e.to_string())?; Ok(result) }, Err(error) => { tx.rollback().await.map_err(|e| e.to_string())?; Err(error) } }
 }
@@ -617,10 +667,13 @@ pub async fn approve_payment_certificate_governed(
     let outcome = async {
         let (scope, mut v) = scope_doc(&mut tx, "payment_certificates", &r.certificate_id).await?;
         let current_status = s(&v, "status");
-        if current_status != "Submitted" && current_status != "Draft" {
+        if current_status != "Submitted" {
             return Err(format!(
                 "Only submitted payment certificates can be approved (current status: {current_status})."
             ));
+        }
+        if !s(&v, "submitted_by").is_empty() && s(&v, "submitted_by") == r.actor {
+            return Err("Maker-checker violation: the submitter cannot approve the same certificate.".into());
         }
 
         if !matches!(
@@ -634,56 +687,61 @@ pub async fn approve_payment_certificate_governed(
         if gross <= 0.0 {
             return Err("Payment certificate gross value must be greater than zero.".into());
         }
+        if s(&v, "certificate_type") == "Subcontractor" {
+            let contract_row = sqlx::query("SELECT parent_main_contract_id,payload FROM contracts WHERE id=?").bind(scope.contract_id.as_deref().unwrap_or_default()).fetch_one(&mut *tx).await.map_err(|e| e.to_string())?;
+            let contract_terms: Value = serde_json::from_str(&contract_row.try_get::<String,_>("payload").map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+            if contract_terms.get("back_to_back_required").and_then(Value::as_bool).unwrap_or(false) {
+                let main_contract: Option<String> = contract_row.try_get("parent_main_contract_id").map_err(|e| e.to_string())?;
+                let main_contract = main_contract.ok_or("Back-to-back term requires a linked main contract.")?;
+                let collected: f64 = sqlx::query_scalar("SELECT COALESCE(SUM(p.amount),0) FROM certificate_partial_payments p JOIN payment_certificates c ON c.id=p.certificate_id WHERE c.contract_id=? AND json_extract(c.payload,'$.certificate_type')='Client'")
+                    .bind(main_contract).fetch_one(&mut *tx).await.map_err(|e| e.to_string())?;
+                if collected <= 0.0 { return Err("Back-to-back contract term blocks subcontract approval until linked client Actual collection exists.".into()); }
+            }
+        }
 
         // Over-certification check (G07)
         if let Some(items) = v.get("items") {
             check_over_certification(&mut tx, &scope, &r.certificate_id, items).await?;
         }
 
-        // WIR certification lock check & insertion (G01)
+        // Re-derive every allocation from the persisted certificate items. The UI
+        // cannot provide quantities, amounts, period IDs, or lock rows as facts.
         let period_id = s(&v, "period_id");
-        let period_id = if period_id.is_empty() {
-            s(&v, "certificate_number")
-        } else {
-            period_id
-        };
-
-        if let Some(locks) = &r.wir_locks {
-            for lock in locks {
-                let existing_count: i64 = sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM wir_certification_lock WHERE wir_id=? AND period_id=? AND boq_item_id=?"
-                )
-                .bind(&lock.wir_id)
-                .bind(&lock.period_id)
-                .bind(&lock.boq_item_id)
-                .fetch_one(&mut *tx)
-                .await
-                .unwrap_or(0);
-
-                if existing_count > 0 {
-                    return Err(format!(
-                        "WIR {} is already locked/certified for period {} and BOQ item {}.",
-                        lock.wir_id, lock.period_id, lock.boq_item_id
-                    ));
-                }
-
-                let lock_id = format!("lock:{}:{}:{}", r.certificate_id, lock.wir_id, lock.boq_item_id);
-                sqlx::query(
-                    r#"
-                    INSERT INTO wir_certification_lock (id, certificate_id, wir_id, period_id, boq_item_id, certified_quantity, certified_amount)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    "#,
-                )
-                .bind(&lock_id)
-                .bind(&r.certificate_id)
-                .bind(&lock.wir_id)
-                .bind(&lock.period_id)
-                .bind(&lock.boq_item_id)
-                .bind(lock.certified_quantity)
-                .bind(lock.certified_amount)
-                .execute(&mut *tx)
-                .await
-                .map_err(|e| format!("Failed to lock WIR {}: {e}", lock.wir_id))?;
+        if period_id.is_empty() { return Err("Certificate reporting period is required.".into()); }
+        let period_row = sqlx::query("SELECT payload FROM reporting_periods WHERE id=?").bind(&period_id).fetch_optional(&mut *tx).await.map_err(|e| e.to_string())?.ok_or("Certificate reporting period was not found.")?;
+        let period_payload: Value = serde_json::from_str(&period_row.try_get::<String,_>("payload").map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+        if matches!(s(&period_payload, "status").as_str(), "Locked" | "Closed") || period_payload.get("locked").and_then(Value::as_bool).unwrap_or(false) { return Err("Reporting period is locked.".into()); }
+        let latest_date: Option<String> = sqlx::query_scalar("SELECT MAX(json_extract(payload,'$.certificate_date')) FROM payment_certificates WHERE contract_id=? AND json_extract(payload,'$.certificate_type')=? AND json_extract(payload,'$.status') IN ('Approved','Partially Paid','Paid')")
+            .bind(scope.contract_id.as_deref().unwrap_or_default()).bind(s(&v, "certificate_type")).fetch_one(&mut *tx).await.map_err(|e| e.to_string())?;
+        if let Some(latest) = latest_date { if latest > r.approved_at { return Err("Certificate date regresses behind an already approved certificate.".into()); } }
+        let items = v.get("items").and_then(Value::as_array).ok_or("Certificate has no governed source items.")?;
+        for item in items {
+            let boq_item_id = s(item, "boq_item_id");
+            let item_quantity = n(item, "quantity");
+            let wir_ids = item.get("wir_ids").and_then(Value::as_array).ok_or("Certificate line has no WIR sources.")?;
+            for wir_value in wir_ids {
+                let wir_id = wir_value.as_str().ok_or("Certificate WIR source ID is invalid.")?;
+                let row = sqlx::query("SELECT project_id,contract_id,boq_item_id,payload FROM wir_entries WHERE id=?")
+                    .bind(wir_id).fetch_optional(&mut *tx).await.map_err(|e| e.to_string())?
+                    .ok_or_else(|| format!("WIR {wir_id} was not found."))?;
+                let wir_project: String = row.try_get("project_id").map_err(|e| e.to_string())?;
+                let wir_contract: Option<String> = row.try_get("contract_id").map_err(|e| e.to_string())?;
+                let wir_boq: Option<String> = row.try_get("boq_item_id").map_err(|e| e.to_string())?;
+                let wir_payload: Value = serde_json::from_str(&row.try_get::<String,_>("payload").map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+                if wir_project != scope.project_id || wir_contract != scope.contract_id || wir_boq.as_deref() != Some(boq_item_id.as_str()) { return Err(format!("WIR {wir_id} is outside certificate scope.")); }
+                if s(&wir_payload, "period_id") != period_id || !matches!(s(&wir_payload, "status").as_str(), "Approved" | "Pass" | "Conditional Pass") { return Err(format!("WIR {wir_id} is not an eligible source for this period.")); }
+                let source_quantity = n(&wir_payload, "quantity");
+                let rate = n(item, "rate");
+                if item_quantity <= 0.0 || source_quantity <= 0.0 || rate <= 0.0 { return Err(format!("WIR {wir_id} has invalid governed quantity/rate.")); }
+                let stream = if s(&v, "certificate_type") == "Client" { "ClientRevenue" } else { "SubcontractEntitlement" };
+                let existing_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM wir_certification_lock WHERE wir_id=? AND boq_item_id=? AND stream=? AND reversed_at IS NULL")
+                    .bind(wir_id).bind(&boq_item_id).bind(stream).fetch_one(&mut *tx).await.map_err(|e| e.to_string())?;
+                if existing_count > 0 { return Err(format!("WIR {wir_id} is already actively certified in stream {stream}.")); }
+                let lock_id = format!("lock:{}:{}:{}", r.certificate_id, wir_id, stream);
+                sqlx::query("INSERT INTO wir_certification_lock (id,certificate_id,wir_id,period_id,boq_item_id,stream,certified_quantity,certified_amount,created_at) VALUES (?,?,?,?,?,?,?,?,?)")
+                    .bind(lock_id).bind(&r.certificate_id).bind(wir_id).bind(&period_id).bind(&boq_item_id).bind(stream)
+                    .bind(source_quantity).bind(money(source_quantity * rate)).bind(stamp())
+                    .execute(&mut *tx).await.map_err(|e| format!("Failed to lock WIR {wir_id}: {e}"))?;
             }
         }
 
@@ -789,6 +847,16 @@ pub async fn record_partial_payment(
     }
 
     let mut tx = db(path).await?.begin().await.map_err(|e| e.to_string())?;
+    if let Some(row) = sqlx::query("SELECT certificate_id FROM certificate_partial_payments WHERE operation_id=?")
+        .bind(&r.operation_id).fetch_optional(&mut *tx).await.map_err(|e| e.to_string())? {
+        let existing_certificate: String = row.try_get("certificate_id").map_err(|e| e.to_string())?;
+        if existing_certificate != r.certificate_id { return Err("Operation ID is already bound to another certificate.".into()); }
+        let (_, existing) = scope_doc(&mut tx, "payment_certificates", &r.certificate_id).await?;
+        let remaining = n(&existing, "remaining_balance");
+        let paid = n(&existing, "total_paid_amount");
+        tx.rollback().await.map_err(|e| e.to_string())?;
+        return Ok(CertificateOperationResult { operation_id: r.operation_id, status: "Replayed".into(), certificate_status: Some(s(&existing, "status")), remaining_balance: Some(remaining), total_paid_amount: Some(paid) });
+    }
     guard(&mut tx, &r.operation_id, true).await?;
 
     let outcome = async {
@@ -820,8 +888,8 @@ pub async fn record_partial_payment(
 
         sqlx::query(
             r#"
-            INSERT INTO certificate_partial_payments (payment_id, certificate_id, payment_date, amount, reference)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO certificate_partial_payments (payment_id, certificate_id, payment_date, amount, reference, operation_id)
+            VALUES (?, ?, ?, ?, ?, ?)
             "#,
         )
         .bind(&payment_id)
@@ -829,6 +897,7 @@ pub async fn record_partial_payment(
         .bind(&r.payment_date)
         .bind(r.amount)
         .bind(ref_str)
+        .bind(&r.operation_id)
         .execute(&mut *tx)
         .await
         .map_err(|e| format!("Failed to record partial payment: {e}"))?;
@@ -933,13 +1002,17 @@ pub async fn reverse_certificate_governed(
 
         // Locks and payment history are append-only. A reversal records a
         // linked compensating entry instead of deleting the source lock.
-        let locked = sqlx::query("SELECT wir_id FROM wir_certification_lock WHERE certificate_id=?")
+        let locked = sqlx::query("SELECT wir_id,stream FROM wir_certification_lock WHERE certificate_id=?")
             .bind(&r.certificate_id).fetch_all(&mut *tx).await.map_err(|e| e.to_string())?;
         for row in locked {
             let wir_id: String = row.try_get("wir_id").map_err(|e| e.to_string())?;
-            let reversal_id = format!("reversal-lock:{}:{}", r.certificate_id, wir_id);
-            sqlx::query("INSERT OR IGNORE INTO certificate_lock_reversals(reversal_id,certificate_id,wir_id,operation_id,created_at,reason) VALUES (?,?,?,?,?,?)")
-                .bind(reversal_id).bind(&r.certificate_id).bind(wir_id).bind(&r.operation_id).bind(stamp()).bind(&r.reason)
+            let stream: String = row.try_get("stream").map_err(|e| e.to_string())?;
+            let reversal_id = format!("reversal-lock:{}:{}:{}", r.certificate_id, wir_id, stream);
+            sqlx::query("INSERT INTO certificate_lock_reversals(reversal_id,certificate_id,wir_id,stream,operation_id,created_at,reason) VALUES (?,?,?,?,?,?,?)")
+                .bind(reversal_id).bind(&r.certificate_id).bind(&wir_id).bind(&stream).bind(&r.operation_id).bind(stamp()).bind(&r.reason)
+                .execute(&mut *tx).await.map_err(|e| e.to_string())?;
+            sqlx::query("UPDATE wir_certification_lock SET reversed_at=? WHERE certificate_id=? AND wir_id=? AND stream=? AND reversed_at IS NULL")
+                .bind(stamp()).bind(&r.certificate_id).bind(&wir_id).bind(&stream)
                 .execute(&mut *tx).await.map_err(|e| e.to_string())?;
         }
 
@@ -1034,4 +1107,42 @@ pub async fn get_certificate_partial_payments(
         .collect();
 
     Ok(records)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    #[tokio::test]
+    async fn w04_sqlite_lock_streams_are_unique_and_reversal_is_append_only() {
+        let pool = SqlitePoolOptions::new().connect("sqlite::memory:").await.unwrap();
+        sqlx::query("CREATE TABLE wir_certification_lock (id TEXT PRIMARY KEY, certificate_id TEXT, wir_id TEXT, stream TEXT, period_id TEXT, boq_item_id TEXT, certified_quantity REAL, certified_amount REAL, created_at TEXT, UNIQUE(wir_id, stream))")
+            .execute(&pool).await.unwrap();
+        sqlx::query("CREATE TABLE certificate_lock_reversals (reversal_id TEXT PRIMARY KEY, certificate_id TEXT, wir_id TEXT, stream TEXT, operation_id TEXT, created_at TEXT, reason TEXT)")
+            .execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO wir_certification_lock VALUES ('l1','c1','w1','ClientRevenue','p1','b1',10,100,'now')")
+            .execute(&pool).await.unwrap();
+        let duplicate = sqlx::query("INSERT INTO wir_certification_lock VALUES ('l2','c2','w1','ClientRevenue','p2','b1',5,50,'now')").execute(&pool).await;
+        assert!(duplicate.is_err(), "the same WIR cannot be certified twice in one entitlement stream");
+        sqlx::query("INSERT INTO certificate_lock_reversals VALUES ('r1','c1','w1','ClientRevenue','op1','now','correction')")
+            .execute(&pool).await.unwrap();
+        let original: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM wir_certification_lock WHERE id='l1'").fetch_one(&pool).await.unwrap();
+        let reversal: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM certificate_lock_reversals WHERE reversal_id='r1'").fetch_one(&pool).await.unwrap();
+        assert_eq!(original.0, 1);
+        assert_eq!(reversal.0, 1);
+    }
+
+    #[tokio::test]
+    async fn w04_sqlite_partial_payment_ledger_rejects_invalid_and_preserves_history() {
+        let pool = SqlitePoolOptions::new().connect("sqlite::memory:").await.unwrap();
+        sqlx::query("CREATE TABLE payments (id TEXT PRIMARY KEY, certificate_id TEXT, amount REAL CHECK(amount > 0), operation_id TEXT UNIQUE)")
+            .execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO payments VALUES ('p1','c1',25,'op1'),('p2','c1',25,'op2')")
+            .execute(&pool).await.unwrap();
+        assert!(sqlx::query("INSERT INTO payments VALUES ('p3','c1',0,'op3')").execute(&pool).await.is_err());
+        assert!(sqlx::query("INSERT INTO payments VALUES ('p4','c1',10,'op1')").execute(&pool).await.is_err());
+        let total: (f64,) = sqlx::query_as("SELECT SUM(amount) FROM payments WHERE certificate_id='c1'").fetch_one(&pool).await.unwrap();
+        assert_eq!(total.0, 50.0);
+    }
 }

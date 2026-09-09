@@ -63,11 +63,6 @@ export const PaymentCertificateWorkbench: React.FC<PaymentCertificateWorkbenchPr
   const [certType, setCertType] = useState<'Client' | 'Subcontractor'>('Client');
   
   // Custom inputs for new certificate
-  const [retentionRate, setRetentionRate] = useState<number>(0.1);
-  const [advanceRecovery, setAdvanceRecovery] = useState<number>(0);
-  const [deductions, setDeductions] = useState<number>(0);
-  const [taxRate, setTaxRate] = useState<number>(0.05);
-  const [notes, setNotes] = useState<string>('');
 
   // Partial Payment Modal State
   const [paymentModalCert, setPaymentModalCert] = useState<PaymentCertificate | null>(null);
@@ -94,10 +89,13 @@ export const PaymentCertificateWorkbench: React.FC<PaymentCertificateWorkbenchPr
     return wirEntries.filter((w: any) => {
       const isApproved = w.status === 'Approved' || w.result === 'Pass' || w.result === 'Conditional Pass';
       const matchesProject = !selectedProjectId || w.project_id === selectedProjectId;
+      const matchesContract = !selectedContractId || w.contract_id === selectedContractId;
       const matchesPeriod = !selectedPeriodId || w.period_id === selectedPeriodId;
-      return isApproved && matchesProject && matchesPeriod;
+      const linkedBoq = boqItems.find((item: any) => item.id === w.boq_item_id) as any;
+      const matchesBoq = Boolean(linkedBoq) && (!selectedContractId || linkedBoq.contract_id === selectedContractId || linkedBoq.contract_id == null);
+      return isApproved && matchesProject && matchesContract && matchesPeriod && matchesBoq;
     });
-  }, [wirEntries, selectedProjectId, selectedPeriodId]);
+  }, [wirEntries, boqItems, selectedProjectId, selectedContractId, selectedPeriodId]);
 
   // WIR Aggregation per BOQ Item
   const aggregatedItems = useMemo(() => {
@@ -125,16 +123,19 @@ export const PaymentCertificateWorkbench: React.FC<PaymentCertificateWorkbenchPr
     }, 0);
   }, [aggregatedItems, certType]);
 
-  // Compute live certificate financial values
-  const computedValues = useMemo(() => {
-    return calculateCertificateValues({
-      grossValue: grossFromWirs,
-      retentionRate,
-      advanceRecovery,
-      deductions,
-      taxRate,
-    });
-  }, [grossFromWirs, retentionRate, advanceRecovery, deductions, taxRate]);
+  // Commercial terms are read-only facts from the selected contract. The UI
+  // never supplies governing rates, deductions, or advance values to Tauri.
+  const selectedContract = contracts.find((contract) => contract.id === selectedContractId) as any;
+  const contractPayload = selectedContract?.payload || selectedContract || {};
+  const contractTerm = (name: string) => Number(contractPayload[name]);
+  const termsReady = Number.isFinite(contractTerm('retention_rate')) && Number.isFinite(contractTerm('tax_rate'));
+  const computedValues = useMemo(() => termsReady ? calculateCertificateValues({
+    grossValue: grossFromWirs,
+    retentionRate: contractTerm('retention_rate'),
+    advanceRecovery: 0,
+    deductions: 0,
+    taxRate: contractTerm('tax_rate'),
+  }) : null, [grossFromWirs, selectedContractId, termsReady]);
 
   // Check over-certification warnings
   const overCertWarnings = useMemo(() => {
@@ -216,22 +217,11 @@ export const PaymentCertificateWorkbench: React.FC<PaymentCertificateWorkbenchPr
     setErrorMessage(null);
     try {
       if ('__TAURI_INTERNALS__' in window) {
-        const wirLocks = (cert.items || []).flatMap((i) =>
-          (i.wir_ids || []).map((wirId) => ({
-            wirId,
-            periodId: cert.period_id || '',
-            boqItemId: i.boq_item_id,
-            certifiedQuantity: i.quantity,
-            certifiedAmount: cert.certificate_type === 'Client' ? (i.client_amount || 0) : (i.subcontract_amount || 0),
-          }))
-        );
-
         await approvePaymentCertificateGoverned({
           operationId: crypto.randomUUID(),
           certificateId: cert.id,
           actor: sessionUser?.username || 'Commercial Manager',
           approvedAt: new Date().toISOString().slice(0, 10),
-          wirLocks,
         });
       } else { throw new Error('Certificate approval requires the governed desktop backend.'); }
 
@@ -513,66 +503,27 @@ export const PaymentCertificateWorkbench: React.FC<PaymentCertificateWorkbenchPr
                 <span className="font-mono font-bold text-sm text-indigo-300">${grossFromWirs.toLocaleString()}</span>
               </div>
 
-              <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-800">
-                <div>
-                  <label className="text-slate-400 block mb-1">Retention Rate</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={retentionRate}
-                    onChange={(e) => setRetentionRate(Number(e.target.value))}
-                    className="w-full px-2 py-1 bg-slate-800 border border-slate-700 rounded-lg text-white font-mono text-xs focus:ring-1 focus:ring-indigo-500"
-                  />
-                </div>
-                <div>
-                  <label className="text-slate-400 block mb-1">Tax Rate</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={taxRate}
-                    onChange={(e) => setTaxRate(Number(e.target.value))}
-                    className="w-full px-2 py-1 bg-slate-800 border border-slate-700 rounded-lg text-white font-mono text-xs focus:ring-1 focus:ring-indigo-500"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-slate-400 block mb-1">Advance Rec ($)</label>
-                  <input
-                    type="number"
-                    value={advanceRecovery}
-                    onChange={(e) => setAdvanceRecovery(Number(e.target.value))}
-                    className="w-full px-2 py-1 bg-slate-800 border border-slate-700 rounded-lg text-white font-mono text-xs focus:ring-1 focus:ring-indigo-500"
-                  />
-                </div>
-                <div>
-                  <label className="text-slate-400 block mb-1">Deductions ($)</label>
-                  <input
-                    type="number"
-                    value={deductions}
-                    onChange={(e) => setDeductions(Number(e.target.value))}
-                    className="w-full px-2 py-1 bg-slate-800 border border-slate-700 rounded-lg text-white font-mono text-xs focus:ring-1 focus:ring-indigo-500"
-                  />
-                </div>
+              <div className="rounded-lg border border-slate-700 bg-slate-800/60 p-3 text-slate-400">
+                Contract terms are read-only and derived by the governed backend.
+                {!termsReady && <span className="block mt-1 text-amber-300">Requires setup: retention and tax terms are missing.</span>}
               </div>
 
               <div className="pt-3 border-t border-slate-800 space-y-1.5">
                 <div className="flex justify-between text-slate-400">
                   <span>Retention Amount:</span>
-                  <span className="font-mono text-slate-300">-${computedValues.retention_amount.toLocaleString()}</span>
+                  <span className="font-mono text-slate-300">-${computedValues?.retention_amount?.toLocaleString() || 'Requires setup'}</span>
                 </div>
                 <div className="flex justify-between text-slate-400">
                   <span>Taxable Base:</span>
-                  <span className="font-mono text-slate-300">${computedValues.taxable_amount.toLocaleString()}</span>
+                  <span className="font-mono text-slate-300">${computedValues?.taxable_amount?.toLocaleString() || 'Requires setup'}</span>
                 </div>
                 <div className="flex justify-between text-slate-400">
                   <span>Tax Amount:</span>
-                  <span className="font-mono text-slate-300">+${computedValues.tax_amount.toLocaleString()}</span>
+                  <span className="font-mono text-slate-300">+${computedValues?.tax_amount?.toLocaleString() || 'Requires setup'}</span>
                 </div>
                 <div className="flex justify-between text-base font-bold text-emerald-400 pt-2 border-t border-slate-800">
                   <span>Net Certified Payable:</span>
-                  <span className="font-mono">${computedValues.net_certified_value.toLocaleString()}</span>
+                  <span className="font-mono">${computedValues?.net_certified_value?.toLocaleString() || 'Requires setup'}</span>
                 </div>
               </div>
             </div>
