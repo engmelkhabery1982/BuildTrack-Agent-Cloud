@@ -221,3 +221,87 @@ export function evaluateBackToBackPaymentAuthorization(params: {
     pwpUnlocked: true,
   };
 }
+
+/**
+ * W04 G01 & G02: Group approved WIR items by boq_item_id and aggregate quantities.
+ * Maintains client selling rate and subcontractor rate separation.
+ */
+export function aggregateWirsForCertificate(
+  wirs: Array<{
+    id: string;
+    boq_item_id: string;
+    quantity: number;
+    description?: string;
+    unit?: string;
+    client_selling_rate?: number;
+    subcontract_rate?: number;
+    unit_price?: number;
+  }>,
+  boqItemsMap?: Record<string, { unit_rate?: number; item_code?: string; item_name?: string }>
+) {
+  const map = new Map<string, {
+    boq_item_id: string;
+    quantity: number;
+    wir_ids: string[];
+    description: string;
+    unit: string;
+    client_selling_rate: number;
+    subcontract_rate: number;
+  }>();
+
+  for (const wir of wirs) {
+    const boqId = wir.boq_item_id;
+    if (!boqId) continue;
+    const qty = Number(wir.quantity) || 0;
+    const boq = boqItemsMap?.[boqId];
+    const clientRate = Number(wir.client_selling_rate ?? boq?.unit_rate ?? wir.unit_price ?? 0);
+    const subRate = Number(wir.subcontract_rate ?? wir.unit_price ?? 0);
+
+    const existing = map.get(boqId);
+    if (existing) {
+      existing.quantity += qty;
+      existing.wir_ids.push(wir.id);
+    } else {
+      map.set(boqId, {
+        boq_item_id: boqId,
+        quantity: qty,
+        wir_ids: [wir.id],
+        description: wir.description || boq?.item_name || boqId,
+        unit: wir.unit || 'm3',
+        client_selling_rate: clientRate,
+        subcontract_rate: subRate,
+      });
+    }
+  }
+
+  return Array.from(map.values()).map((item) => ({
+    ...item,
+    quantity: Math.round(item.quantity * 1000) / 1000,
+    client_amount: Math.round(item.quantity * item.client_selling_rate * 100) / 100,
+    subcontract_amount: Math.round(item.quantity * item.subcontract_rate * 100) / 100,
+  }));
+}
+
+/**
+ * W04 G07: Verify whether a candidate quantity for a BOQ item exceeds the contract BOQ quantity.
+ */
+export function validateOverCertification(input: {
+  candidateQuantity: number;
+  priorCertifiedQuantity: number;
+  contractBoqQuantity: number;
+}) {
+  const candidate = Number(input.candidateQuantity) || 0;
+  const prior = Number(input.priorCertifiedQuantity) || 0;
+  const boqQty = Number(input.contractBoqQuantity) || 0;
+  const total = candidate + prior;
+  const isOver = boqQty > 0 && total > boqQty + 0.000001;
+
+  return {
+    priorCertifiedQuantity: prior,
+    candidateQuantity: candidate,
+    totalCertifiedQuantity: Math.round(total * 1000) / 1000,
+    contractBoqQuantity: boqQty,
+    isOverCertifying: isOver,
+    excessQuantity: isOver ? Math.round((total - boqQty) * 1000) / 1000 : 0,
+  };
+}

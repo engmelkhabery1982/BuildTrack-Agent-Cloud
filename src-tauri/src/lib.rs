@@ -5,6 +5,7 @@ use tauri::Manager;
 mod import_batch;
 mod supplier_ap;
 mod commercial_workflow;
+mod certificate_workflow;
 mod report_versioning;
 mod cost_plan_versioning;
 mod estimate_versioning;
@@ -3184,6 +3185,48 @@ pub fn run() {
             "#,
             kind: tauri_plugin_sql::MigrationKind::Up,
         },
+        tauri_plugin_sql::Migration {
+            version: 75,
+            description: "w04_governed_payment_certificates",
+            sql: r#"
+            CREATE TABLE IF NOT EXISTS certificate_partial_payments (
+              payment_id TEXT PRIMARY KEY,
+              certificate_id TEXT NOT NULL,
+              payment_date TEXT NOT NULL,
+              amount REAL NOT NULL,
+              reference TEXT,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              FOREIGN KEY (certificate_id) REFERENCES payment_certificates(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS wir_certification_lock (
+              id TEXT PRIMARY KEY,
+              certificate_id TEXT NOT NULL,
+              wir_id TEXT NOT NULL,
+              period_id TEXT NOT NULL,
+              boq_item_id TEXT NOT NULL,
+              certified_quantity REAL NOT NULL,
+              certified_amount REAL NOT NULL,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              UNIQUE(wir_id, period_id, boq_item_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS certificate_mutation_guard (
+              operation_id TEXT PRIMARY KEY,
+              created_at TEXT NOT NULL
+            );
+
+            DROP TRIGGER IF EXISTS certificate_governance_guard;
+
+            CREATE TRIGGER IF NOT EXISTS certificate_governance_guard
+            BEFORE UPDATE ON payment_certificates
+            WHEN json_extract(NEW.payload, '$.status') IN ('Approved', 'Partially Paid', 'Paid', 'Reversed')
+              AND NOT EXISTS (SELECT 1 FROM commercial_mutation_guard)
+              AND NOT EXISTS (SELECT 1 FROM certificate_mutation_guard)
+            BEGIN SELECT RAISE(ABORT, 'Governed payment certificate changes must use a lifecycle command.'); END;
+            "#,
+            kind: tauri_plugin_sql::MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()
@@ -3212,6 +3255,11 @@ pub fn run() {
             approve_variation,
             approve_payment_certificate,
             settle_payment_certificate,
+            submit_payment_certificate,
+            approve_payment_certificate_governed,
+            record_partial_payment,
+            reverse_certificate_governed,
+            get_certificate_partial_payments,
             reverse_commercial_posting,
             reverse_variation,
             issue_report_version, approve_report_template,
@@ -3233,6 +3281,51 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[tauri::command]
+async fn submit_payment_certificate(
+    app: tauri::AppHandle,
+    request: certificate_workflow::SubmitCertificateRequest,
+) -> Result<certificate_workflow::CertificateOperationResult, String> {
+    let path = app.path().app_config_dir().map_err(|e| e.to_string())?.join("buildtrack.db");
+    certificate_workflow::submit_payment_certificate(&path, request).await
+}
+
+#[tauri::command]
+async fn approve_payment_certificate_governed(
+    app: tauri::AppHandle,
+    request: certificate_workflow::ApproveCertificateGovernedRequest,
+) -> Result<certificate_workflow::CertificateOperationResult, String> {
+    let path = app.path().app_config_dir().map_err(|e| e.to_string())?.join("buildtrack.db");
+    certificate_workflow::approve_payment_certificate_governed(&path, request).await
+}
+
+#[tauri::command]
+async fn record_partial_payment(
+    app: tauri::AppHandle,
+    request: certificate_workflow::PartialPaymentRequest,
+) -> Result<certificate_workflow::CertificateOperationResult, String> {
+    let path = app.path().app_config_dir().map_err(|e| e.to_string())?.join("buildtrack.db");
+    certificate_workflow::record_partial_payment(&path, request).await
+}
+
+#[tauri::command]
+async fn reverse_certificate_governed(
+    app: tauri::AppHandle,
+    request: certificate_workflow::ReverseCertificateRequest,
+) -> Result<certificate_workflow::CertificateOperationResult, String> {
+    let path = app.path().app_config_dir().map_err(|e| e.to_string())?.join("buildtrack.db");
+    certificate_workflow::reverse_certificate_governed(&path, request).await
+}
+
+#[tauri::command]
+async fn get_certificate_partial_payments(
+    app: tauri::AppHandle,
+    certificate_id: String,
+) -> Result<Vec<certificate_workflow::PartialPaymentRecord>, String> {
+    let path = app.path().app_config_dir().map_err(|e| e.to_string())?.join("buildtrack.db");
+    certificate_workflow::get_certificate_partial_payments(&path, certificate_id).await
 }
 
 

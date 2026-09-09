@@ -28,6 +28,7 @@ const TABLES = new Set([
   "labor_timesheets", "labor_timesheet_lines",
   "equipment_logs", "claims", "claim_lines",
   "cash_forecast_versions", "health_score_versions", "resource_leveling_proposals",
+  "certificate_partial_payments", "wir_certification_lock",
 ]);
 
 const CONTROL_ACCOUNT_SOURCE_TABLES = new Set([

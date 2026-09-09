@@ -670,6 +670,28 @@ export interface ClientInvoice {
   created_at: string;
 }
 
+export interface CertificateItem {
+  id?: string;
+  boq_item_id: string;
+  description?: string;
+  unit?: string;
+  quantity: number;
+  client_selling_rate?: number;
+  client_amount?: number;
+  subcontract_rate?: number;
+  subcontract_amount?: number;
+  wir_ids?: string[];
+}
+
+export interface CertificatePartialPayment {
+  payment_id: string;
+  certificate_id: string;
+  payment_date: string;
+  amount: number;
+  reference?: string;
+  created_at: string;
+}
+
 /** Approved commercial certificate: the controlled payment summary for one contract. */
 export interface PaymentCertificate {
   id: string;
@@ -682,15 +704,21 @@ export interface PaymentCertificate {
   payment_date: string | null;
   period_start: string | null;
   period_end: string | null;
+  period_id?: string | null;
   certificate_date: string | null;
   gross_certified_value: number;
   retention_rate: number;
   advance_recovery: number;
   deductions: number;
   tax_rate: number;
-  status: 'Draft' | 'Submitted' | 'Approved' | 'Rejected' | 'Paid' | string;
+  status: 'Draft' | 'Submitted' | 'Approved' | 'Partially Paid' | 'Paid' | 'Reversed' | string;
   approved_by: string;
   approved_date: string | null;
+  submitted_by?: string | null;
+  submitted_date?: string | null;
+  remaining_balance?: number;
+  total_paid_amount?: number;
+  items?: CertificateItem[];
   /** Back-to-Back (PWP) flag for subcontract settlements */
   pwp_unlocked?: boolean;
   unlocked_for_subcontractors?: boolean;

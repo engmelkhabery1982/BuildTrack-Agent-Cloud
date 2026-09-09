@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { LayoutDashboard, Database, FolderKanban, SquareCheck as CheckSquare, DollarSign, Package, ShieldAlert, TrendingUp, CalendarClock, Signature as FileSignature, ClipboardList, Banknote, Receipt, FileText, GitBranch, FolderOpen, FileCheck as FileCheck2, Building2, Menu, ListOrdered, HardHat, Wrench, ClipboardCheck, Layers, Download, Bell, CircleAlert, BrainCircuit, Maximize2, Minimize2, ArrowLeft, ArrowRight, Users, Gauge, Sliders } from 'lucide-react';
 import { useData } from '@/hooks/useData';
-import { acceptProcurementReceipt, amendPurchaseOrder, approveCostChange, approveCostPlanVersion, approvePaymentCertificate, approvePurchaseOrder, approveSupplierInvoice, approveVariation, assertBaselineApproval, assertRecordPeriodIsOpen, assertReportingPeriodDefinition, cancelPurchaseOrder, compareBaselineActivities, compareBaselineActivityDetails, compareBaselineRevisions, createBaselineActivitySnapshot, createBaselineDistributionSnapshot, createCodeDraft, dataRepository, issueReportVersion, prepareCodeControlledInsert, reverseCommercialPosting, reverseSupplierApPosting, reverseVariation, settlePaymentCertificate, settleSupplierInvoicePayment, STATUS_SETS, summarizeBaselineSchedule, submitLaborTimesheet, approveLaborTimesheet, postLaborTimesheet, reverseLaborTimesheet, approveEquipmentLog, postEquipmentLog, reverseEquipmentLog } from '@/data';
+import { acceptProcurementReceipt, amendPurchaseOrder, approveCostChange, approveCostPlanVersion, approvePaymentCertificate, approvePaymentCertificateGoverned, approvePurchaseOrder, approveSupplierInvoice, approveVariation, assertBaselineApproval, assertRecordPeriodIsOpen, assertReportingPeriodDefinition, cancelPurchaseOrder, compareBaselineActivities, compareBaselineActivityDetails, compareBaselineRevisions, createBaselineActivitySnapshot, createBaselineDistributionSnapshot, createCodeDraft, dataRepository, issueReportVersion, prepareCodeControlledInsert, recordPartialPayment, reverseCertificateGoverned, reverseCommercialPosting, reverseSupplierApPosting, reverseVariation, settlePaymentCertificate, settleSupplierInvoicePayment, STATUS_SETS, submitPaymentCertificate, summarizeBaselineSchedule, submitLaborTimesheet, approveLaborTimesheet, postLaborTimesheet, reverseLaborTimesheet, approveEquipmentLog, postEquipmentLog, reverseEquipmentLog } from '@/data';
 import { Dashboard } from '@/components/Dashboard';
 import { DataTableView, type ColumnDef, type FilterDef, type SelectOption } from '@/components/DataTableView';
 import { ReportTemplateDesigner } from '@/components/ReportTemplateDesigner';
@@ -28,6 +28,7 @@ import { ClaimAssessmentModal } from '@/components/ClaimAssessmentModal';
 import { IntegratedProjectControlsCockpit } from '@/components/IntegratedProjectControlsCockpit';
 import { ExternalPortalView } from '@/components/ExternalPortalView';
 import { VarianceActionRegisterView } from '@/components/VarianceActionRegisterView';
+import { PaymentCertificateWorkbench } from '@/components/PaymentCertificateWorkbench';
 import { useVarianceActions } from '@/hooks/useVarianceActions';
 import { ProjectDataDateProvider, useProjectDataDate } from '@/context/ProjectDataDateContext';
 import type { ViewKey, Project, ScheduleVersion, DelayEvent, WBSNode, ReportVersion } from '@/types';
@@ -2566,6 +2567,26 @@ function AppWorkspace() {
       );
     }
 
+    if (activeView === 'paymentCertificates') {
+      return (
+        <div className="h-full overflow-y-auto p-4 sm:p-6 bg-slate-50/50">
+          <PaymentCertificateWorkbench
+            projects={data.projects as any[]}
+            contracts={data.contracts as any[]}
+            boqItems={data.boqItems as any[]}
+            wirEntries={data.wirEntries as any[]}
+            paymentCertificates={data.paymentCertificates as any[]}
+            reportingPeriods={data.reportingPeriods as any[]}
+            certificatePartialPayments={data.certificatePartialPayments as any[]}
+            sessionUser={sessionUser}
+            onReload={async () => {
+              await data.reload();
+            }}
+          />
+        </div>
+      );
+    }
+
     if (activeView === 'portfolio') {
       const money = (value: number | null) => value === null ? 'Unavailable' : value.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
       const portfolioRows = data.projects.map((project: any) => {
@@ -2802,7 +2823,7 @@ function AppWorkspace() {
                   ? data.controlAccounts.map((account: any) => ({ ...account, ...calculateControlAccountSummary({ account, boqItems: data.boqItems as Record<string, any>[], sovLines: data.contractSovLines as Record<string, any>[], schedules: data.schedules as Record<string, any>[], scheduleDistributions: data.scheduleDistributions as Record<string, any>[], baselines: data.baselines as Record<string, any>[], wirEntries: data.wirEntries as Record<string, any>[], costEntries: data.costEntries as Record<string, any>[], procurement: data.procurement as Record<string, any>[], procurementReceipts: data.procurementReceipts as Record<string, any>[] }) }))
                 : activeView === 'costChanges'
                   ? data.costChanges
-          : activeView === 'paymentCertificates'
+          : (activeView as string) === 'paymentCertificates'
                   ? data.paymentCertificates
       : activeView === 'procurementReceipts'
                     ? data.procurementReceipts
@@ -3102,7 +3123,7 @@ function AppWorkspace() {
             forecast_variance: forecast.forecastVariance,
           };
         })
-      : activeView === 'paymentCertificates'
+      : (activeView as string) === 'paymentCertificates'
         ? rawViewData.map((certificate: any) => {
           const values = calculateCertificateValues(certificate);
           const contract = contractById.get(certificate.contract_id) as any;
@@ -4065,7 +4086,11 @@ function AppWorkspace() {
           onClick: async (row) => {
             const reason = window.prompt('Reason for governed payment-certificate reversal:');
             if (!reason?.trim()) return;
-            await reverseCommercialPosting({ operationId: crypto.randomUUID(), sourceTable: 'payment_certificates', sourceId: row.id, actor: 'Local User', reason: reason.trim() });
+            if ("__TAURI_INTERNALS__" in window) {
+              await reverseCertificateGoverned({ operationId: crypto.randomUUID(), certificateId: row.id, actor: sessionUser?.username || 'Local User', reason: reason.trim() });
+            } else {
+              await reverseCommercialPosting({ operationId: crypto.randomUUID(), sourceTable: 'payment_certificates', sourceId: row.id, actor: 'Local User', reason: reason.trim() });
+            }
             await data.reload();
           },
         } : tableName === 'client_invoices' ? {
@@ -4482,15 +4507,34 @@ function AppWorkspace() {
           return dataRepository.update<Record<string, any>>('cost_changes', id, patch);
         } : tableName === 'payment_certificates' ? async (id, patch) => {
           const current = data.paymentCertificates.find((row: any) => row.id === id) as any;
+          if (patch.status === 'Submitted' && current?.status === 'Draft') {
+            if ("__TAURI_INTERNALS__" in window) {
+              await submitPaymentCertificate({ operationId: crypto.randomUUID(), certificateId: id, actor: sessionUser?.username || 'Local User', submittedAt: patch.submitted_date || new Date().toISOString().slice(0, 10) });
+              const rows = await dataRepository.list<Record<string, any>>('payment_certificates');
+              return rows.find((row) => row.id === id) || current;
+            }
+          }
           if (patch.status === 'Approved' && current?.status !== 'Approved') {
-            await approvePaymentCertificate({ operationId: crypto.randomUUID(), sourceId: id, actor: 'Local User', approvedAt: patch.approved_date || new Date().toISOString().slice(0, 10) });
-            const rows = await dataRepository.list<Record<string, any>>('payment_certificates');
-            return rows.find((row) => row.id === id) || current;
+            if ("__TAURI_INTERNALS__" in window) {
+              await approvePaymentCertificateGoverned({ operationId: crypto.randomUUID(), certificateId: id, actor: sessionUser?.username || 'Local User', approvedAt: patch.approved_date || new Date().toISOString().slice(0, 10) });
+              const rows = await dataRepository.list<Record<string, any>>('payment_certificates');
+              return rows.find((row) => row.id === id) || current;
+            } else {
+              await approvePaymentCertificate({ operationId: crypto.randomUUID(), sourceId: id, actor: 'Local User', approvedAt: patch.approved_date || new Date().toISOString().slice(0, 10) });
+              const rows = await dataRepository.list<Record<string, any>>('payment_certificates');
+              return rows.find((row) => row.id === id) || current;
+            }
           }
           if (patch.status === 'Paid' && current?.status === 'Approved') {
-            await settlePaymentCertificate({ operationId: crypto.randomUUID(), certificateId: id, actor: 'Local User', paidAt: patch.payment_date || new Date().toISOString().slice(0, 10) });
-            const rows = await dataRepository.list<Record<string, any>>('payment_certificates');
-            return rows.find((row) => row.id === id) || current;
+            if ("__TAURI_INTERNALS__" in window) {
+              await settlePaymentCertificate({ operationId: crypto.randomUUID(), certificateId: id, actor: sessionUser?.username || 'Local User', paidAt: patch.payment_date || new Date().toISOString().slice(0, 10) });
+              const rows = await dataRepository.list<Record<string, any>>('payment_certificates');
+              return rows.find((row) => row.id === id) || current;
+            } else {
+              await settlePaymentCertificate({ operationId: crypto.randomUUID(), certificateId: id, actor: 'Local User', paidAt: patch.payment_date || new Date().toISOString().slice(0, 10) });
+              const rows = await dataRepository.list<Record<string, any>>('payment_certificates');
+              return rows.find((row) => row.id === id) || current;
+            }
           }
           if (['Approved', 'Paid', 'Reversed'].includes(String(current?.status || ''))) throw new Error('Governed payment certificates are immutable; use settlement or reversal.');
           return dataRepository.update<Record<string, any>>('payment_certificates', id, patch);
