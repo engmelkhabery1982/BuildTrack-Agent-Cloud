@@ -3622,20 +3622,22 @@ pub fn run() {
               );
               CREATE TABLE IF NOT EXISTS wir_certification_lock (
                 id TEXT PRIMARY KEY, certificate_id TEXT NOT NULL, wir_id TEXT NOT NULL,
-                period_id TEXT NOT NULL, boq_item_id TEXT NOT NULL, certified_quantity REAL NOT NULL,
-                certified_amount REAL NOT NULL, created_at TEXT NOT NULL,
-                UNIQUE(wir_id, period_id, boq_item_id),
+                period_id TEXT NOT NULL, boq_item_id TEXT NOT NULL, stream TEXT NOT NULL,
+                certified_quantity REAL NOT NULL, certified_amount REAL NOT NULL,
+                created_at TEXT NOT NULL, reversed_at TEXT,
+                UNIQUE(wir_id, stream, reversed_at),
                 FOREIGN KEY (certificate_id) REFERENCES payment_certificates(id) ON DELETE RESTRICT
               );
               CREATE INDEX IF NOT EXISTS idx_wir_certification_lock_certificate ON wir_certification_lock(certificate_id);
               CREATE TABLE IF NOT EXISTS certificate_lock_reversals (
                 reversal_id TEXT PRIMARY KEY, certificate_id TEXT NOT NULL, wir_id TEXT NOT NULL,
-                operation_id TEXT NOT NULL, created_at TEXT NOT NULL, reason TEXT NOT NULL,
+                stream TEXT NOT NULL, operation_id TEXT NOT NULL, created_at TEXT NOT NULL, reason TEXT NOT NULL,
                 FOREIGN KEY (certificate_id) REFERENCES payment_certificates(id) ON DELETE RESTRICT
               );
               CREATE TABLE IF NOT EXISTS certificate_partial_payments (
                 payment_id TEXT PRIMARY KEY, certificate_id TEXT NOT NULL, payment_date TEXT NOT NULL,
-                amount REAL NOT NULL CHECK(amount > 0), reference TEXT, created_at TEXT NOT NULL,
+                amount REAL NOT NULL CHECK(amount > 0), reference TEXT, operation_id TEXT NOT NULL,
+                created_at TEXT NOT NULL, UNIQUE(operation_id),
                 UNIQUE(certificate_id, payment_id),
                 FOREIGN KEY (certificate_id) REFERENCES payment_certificates(id) ON DELETE RESTRICT
               );
