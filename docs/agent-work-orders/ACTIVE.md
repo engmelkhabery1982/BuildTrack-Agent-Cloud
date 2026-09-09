@@ -28,6 +28,9 @@ W04_CANDIDATE_HEAD=d5551efe14decac880d002512493afba0d178618
 W04_RESUME_RULE=PULL_AGENT_CLOUD_MAIN_AND_CORRECT_CANDIDATE_IN_PLACE
 FEATURE_BATCH_LIMIT=1
 STOP_AFTER_CURRENT_FEATURE=true
+PARALLEL_CANDIDATE_FEATURES=W05|W06
+PARALLEL_CANDIDATE_MODE=SEPARATE_ARENA_BRANCHES_NO_INTEGRATION
+PARALLEL_INTEGRATION_GATE=W04_MUST_BE_ACCEPTED_BEFORE_W05;W05_MUST_BE_ACCEPTED_BEFORE_W06
 OUT_OF_SCOPE_COMMITS=FORBIDDEN
 PREREQUISITE=W03:CLOSED_8_OF_10_BY_CODEX
 SPEC_ANCHOR=W04
@@ -60,4 +63,7 @@ KNOWN_FAILED_DELIVERY=archive/w04-unreviewed-20260909|d5551efe14decac880d0025124
 - لا commit ولا Push قبل نجاح `tools/agent-delivery-gate.ps1`.
 - لا تكتب `PASS` أو `CLOSED` أو تقييمًا ذاتيًا. النتيجة الوحيدة المسموحة:
   `READY FOR CODEX REVIEW` أو `WIP/BLOCKED`.
+- يجوز لوكيلين منفصلين إعداد مرشحي W05 وW06 بالتوازي وفق خطتيهما، كل ميزة في فرع Arena
+  مستقل، لكن يُمنع دمجهما في `main` أو تغيير `CURRENT_FEATURE`. التسليم للمراجعة فقط،
+  ويعاد ربط W05 بعد W04 ثم W06 بعد W05 قبل أي قبول رسمي.
 
