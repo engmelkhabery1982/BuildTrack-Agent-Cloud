@@ -2,7 +2,9 @@
 
 هذه الخطة ملزمة وتُقرأ بعد `ACTIVE.md` وملف مراجعة Codex. لا يجوز تغيير ترتيبها أو
 اعتبار مرحلة مكتملة قبل نجاح بوابتها. استخدم تسليم الأرشيف كمرجع انتقائي فقط، وابدأ
-دائمًا من `ACTIVE.ACCEPTED_HEAD` المحتوي على W03 المقبولة.
+من أحدث `agent-cloud/main` الذي يحتوي مرشح W04 المحفوظ ومراجعة Codex. يبقى
+`ACTIVE.ACCEPTED_HEAD` مرجع المنتج المقبول، بينما `W04_CANDIDATE_HEAD` نقطة الاستكمال؛
+لا تعد التنفيذ من الصفر ولا تبدأ W05.
 
 ## تعريف الاكتمال
 
@@ -56,6 +58,9 @@ W04 لا تُسلّم إلا إذا:
 **بوابة 2:** 5 WIR aggregation، duplicate، concurrent race، over-certification،
 client/subcontract separation، missing rate؛ كلها Rust/SQLite وليست utility فقط.
 
+ويجب أن يثبت الاختبار أن frontend لا يرسل كل WIR في المشروع/الفترة: المرشح المؤهل يطابق
+`project_id + contract_id + period_id + certificate_type`، وأن تغيير العقد يعيد تصفية المصدر.
+
 ## المرحلة 3 — الصيغة التجارية وشروط العقد
 
 **تغلق:** `W04-R07` و`G04,G08`.
@@ -94,6 +99,9 @@ race، reopen؛ اختبارات تنفيذية مع إعادة فتح DB.
 **بوابة 5:** فشل متأخر يسبب rollback كامل؛ reconciliation قبل/بعد partial/final/reversal؛
 locked reversal؛ back-to-back enabled/disabled/cross-scope.
 
+ممنوع استخدام `DELETE FROM cash_flow` أو حذف locks/payments كآلية عكس؛ المطلوب قيود/حركات
+تعويضية append-only، مع اختبار يثبت بقاء السجل الأصلي وإجمالي صافٍ صحيح.
+
 ## المرحلة 6 — الواجهة التشغيلية
 
 **تغلق:** الباقي من `W04-G01,G05,G07`.
@@ -107,6 +115,9 @@ locked reversal؛ back-to-back enabled/disabled/cross-scope.
 
 **بوابة 6:** mounted render، scope reset، no Rules of Hooks، no fake values، lifecycle
 buttons، reload/reopen. `npm test` و`npm run build` ينجحان.
+
+لا تعرض نسب retention/tax أو advance/deductions قابلة للتحرير باعتبارها حاكمة إذا لم تكن
+جزءًا من contract terms معتمدًا. اعرض مصدر كل شرط أو `Requires setup`.
 
 ## المرحلة 7 — دليل التسليم النهائي
 

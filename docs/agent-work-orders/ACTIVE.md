@@ -23,6 +23,9 @@ W04_SEED_FILES=src-tauri/src/certificate_workflow.rs|src/components/PaymentCerti
 CURRENT_FEATURE=W04
 CURRENT_TITLE=Governed Payment Certificate and Invoice Reconciliation Correction
 CURRENT_STATUS=IN_PROGRESS_NOT_ACCEPTED
+CODEX_REVIEW_STATUS=CORRECTION_REQUIRED_AFTER_LOCAL_REVIEW
+W04_CANDIDATE_HEAD=d5551efe14decac880d002512493afba0d178618
+W04_RESUME_RULE=PULL_AGENT_CLOUD_MAIN_AND_CORRECT_CANDIDATE_IN_PLACE
 FEATURE_BATCH_LIMIT=1
 STOP_AFTER_CURRENT_FEATURE=true
 OUT_OF_SCOPE_COMMITS=FORBIDDEN
@@ -40,13 +43,14 @@ CONDITIONAL_MODIFY=src/data/dataDictionary.ts|src/utils/paymentTerms.ts|src/util
 FORBIDDEN=AGENTS.md|docs/agent-work-orders/**|package.json|package-lock.json|bun.lock|src-tauri/Cargo.toml|src-tauri/Cargo.lock|vite.config.*|.env*|metadata.json
 REQUIRED_GAPS=W04-G01|W04-G02|W04-G03|W04-G04|W04-G05|W04-G06|W04-G07|W04-G08|W04-G09|W04-G10|W04-R01|W04-R02|W04-R03|W04-R04|W04-R05|W04-R06|W04-R07|W04-R08|W04-R09|W04-R10|W04-R11|W04-R12
 REQUIRED_TESTS=npm test|npm run build|cargo test --manifest-path src-tauri/Cargo.toml|git diff --check
-KNOWN_FAILED_DELIVERY=archive/w04-unreviewed-20260909
+KNOWN_FAILED_DELIVERY=archive/w04-unreviewed-20260909|d5551efe14decac880d002512493afba0d178618
 ```
 
 قواعد حاسمة:
 
 - ابدأ فقط بعد نجاح `tools/agent-preflight.ps1`.
-- ابدأ من `ACCEPTED_HEAD` الذي يحتوي W03 المقبولة؛ لا تنسخ commit التسليم المرفوض كاملًا.
+- ابدأ من أحدث `agent-cloud/main`؛ فهو يحتفظ بالأجزاء الصحيحة من مرشح W04 ويضيف مراجعة Codex.
+  لا تبدأ W04 من الصفر ولا تدّع أن `W04_CANDIDATE_HEAD` مقبول في المنتج.
 - نفذ تصحيح W04 وحده ولا تبدأ W05 أو Report Designer.
 - الحزمة السابقة في `KNOWN_FAILED_DELIVERY` مرجع فشل فقط وليست base ولا مصدر كود.
 - لا تعدل قائمة `CONDITIONAL_MODIFY` إلا عند إثبات dependency مباشر وتسجيل السبب.

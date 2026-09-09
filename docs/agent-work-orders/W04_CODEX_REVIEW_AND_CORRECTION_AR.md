@@ -6,6 +6,51 @@
 للدفع إلى المنتج**. لا تحذفه ولا تنسخه wholesale. ابدأ من `ACTIVE.ACCEPTED_HEAD`،
 واستخدم المسودة كمرجع قراءة فقط عند الحاجة. المطلوب تصحيح W04 وحده وإثبات كل بوابة.
 
+## مراجعة Codex المحلية للمرشح d5551ef — 2026-09-09
+
+المرشح مفيد ويُستكمل **في مكانه** ولا يُعاد من الصفر، لكنه غير مقبول بعد ولا يحقق 8/10.
+نجح محليًا `npm test` (248/248)، و`npm run build`، و`cargo test` (47/47)،
+و`git diff --check`. مع ذلك، أمر Rust الموجّه إلى `certificate_workflow::tests`
+شغّل **صفر اختبار**؛ فلا يوجد أي Rust/SQLite test تنفيذي لـW04. اختبارات Node التسعة
+تفحص utilities/text ولا تثبت المعاملة الخلفية.
+
+الفجوات التي يجب إغلاقها قبل إعادة التسليم:
+
+1. `eligibleWirs` يرشح بالمشروع والفترة فقط ولا يرشح بـ`selectedContractId`؛ لذلك يرسل
+   WIRs من عقود أخرى، ثم يفشل command بالكامل أو يخلط العرض. يجب أن يرشح contract وBOQ
+   والنوع، وأن يعيد reset للاختيارات عند تغيير scope.
+2. شاشة الإنشاء تعرض retention/tax/advance/deductions/notes، لكن command لا يرسلها ولا
+   يشتقها؛ والـbackend ينشئ Draft بلا شروط تجارية فتُحسب صفرًا عند الاعتماد. احذف حقول
+   UI الحاكمة أو اشتق جميع الشروط من contract terms الموثوقة في الخلفية، مع
+   `Requires setup` عند غيابها.
+3. الاعتماد ما زال يقبل `wir_locks` اختياريًا من UI ويثق في quantity/amount/period؛ يمكن
+   اعتماد شهادة بلا locks أو بقيم مزورة. يجب ألا يقبل command locks مالية من UI؛ يعيد
+   اشتقاقها من certificate items + WIR/BOQ/period داخل نفس transaction.
+4. frontend يبني `certifiedAmount` من `client_amount/subcontract_amount` بينما Draft
+   الخلفي يحفظ `amount` فقط؛ الناتج الحالي صفر. أصل المشكلة يُحل بإزالة المدخل الموثوق
+   من UI واشتقاق المبلغ خلفيًا، لا بمجرد تغيير اسم الحقل.
+5. approval يسمح `Draft` رغم أن lifecycle الملزم هو Submitted فقط، ولا يوجد maker-checker
+   بين `submitted_by` و`approved_by`.
+6. WIR lock uniqueness هي `(wir_id, period_id, boq_item_id)` ولا تفصل entitlement stream،
+   وتسمح بإعادة نفس WIR في فترة أخرى. كذلك reversal يسجل reversal row لكن فحص duplicate
+   لا يعتبره release، فيبقى المصدر مقفولًا فعليًا. صمّم stream صريحًا وactive-lock semantics.
+7. `cash()` يحذف صفوف cash السابقة للشهادة عند reversal/forecast refresh؛ هذا عكس هدّام
+   ومخالف لـappend-only. يجب تسجيل compensating cash rows وعدم حذف Forecast/Actual history.
+8. draft لا يولد certificate number ولا ينشئ/يربط invoice register/tracking، لذلك دالة
+   reconciliation غالبًا no-op. يجب إنشاء الروابط والأرقام الحاكمة ذريًا وإثبات تطابق
+   paid/remaining في certificate + register + tracking + cash.
+9. previous/current/cumulative غير مشتقة ولا محفوظة لكل line، ولا يوجد تجميع حقيقي لخمسة
+   WIRs لنفس BOQ في line واحدة.
+10. لا يوجد تطبيق Back-to-back contract term؛ البحث في ملفات W04 لا يظهر منطقًا تنفيذيًا.
+11. period lock/date regression/operation replay/concurrent overpay/atomic late failure غير
+   مختبرة في W04. `guard` الحالي يجعل replay خطأ duplicate بدل إعادة النتيجة نفسها.
+12. `W04_EVIDENCE.json` يسجل `end_head` مساويًا لـSTART_HEAD خطأ، ويكرر ملف evidence في
+   changes؛ أصلح مولد الدليل أو التقرير ولا تكتب PASS ذاتيًا دون اختبار مطابق.
+
+تعليمات الاستكمال: احتفظ بإصلاحات compile، إزالة fake fallbacks، typed invokes، migration
+76، والـUI mounting. لا تعدّل ميزات أخرى. نفذ المراحل 1→7 أدناه مع Rust tests حقيقية، ثم
+أعد Delivery Gate. لا تبدأ W05.
+
 ## أدلة الفشل الحالية
 
 - `npm test`: ‏239 نجح و2 فشل من 241؛ فشل اختبار الصيغ واختبار retention/advance.
