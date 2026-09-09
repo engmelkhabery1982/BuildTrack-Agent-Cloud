@@ -90,7 +90,7 @@ pub struct ReverseCertificateRequest {
     pub reason: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct CertificateOperationResult {
     pub operation_id: String,
@@ -231,6 +231,34 @@ async fn guard(
     Ok(())
 }
 
+async fn replay_operation(
+    tx: &mut Transaction<'_, Sqlite>,
+    operation_id: &str,
+    certificate_id: &str,
+) -> Result<Option<CertificateOperationResult>, String> {
+    let row = sqlx::query("SELECT certificate_id,result_json FROM certificate_operation_results WHERE operation_id=?")
+        .bind(operation_id).fetch_optional(&mut **tx).await.map_err(|e| e.to_string())?;
+    let Some(row) = row else { return Ok(None); };
+    let stored_certificate: String = row.try_get("certificate_id").map_err(|e| e.to_string())?;
+    if stored_certificate != certificate_id { return Err("Operation ID is already bound to another certificate.".into()); }
+    let result: CertificateOperationResult = serde_json::from_str(&row.try_get::<String,_>("result_json").map_err(|e| e.to_string())?)
+        .map_err(|e| format!("Stored operation result is invalid: {e}"))?;
+    Ok(Some(CertificateOperationResult { status: "Replayed".into(), ..result }))
+}
+
+async fn save_operation(
+    tx: &mut Transaction<'_, Sqlite>,
+    command: &str,
+    result: &CertificateOperationResult,
+    certificate_id: &str,
+) -> Result<(), String> {
+    sqlx::query("INSERT INTO certificate_operation_results(operation_id,certificate_id,command,result_json,created_at) VALUES (?,?,?,?,?)")
+        .bind(&result.operation_id).bind(certificate_id).bind(command)
+        .bind(serde_json::to_string(result).map_err(|e| e.to_string())?).bind(stamp())
+        .execute(&mut **tx).await.map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 async fn put(
     tx: &mut Transaction<'_, Sqlite>,
     id: &str,
@@ -322,6 +350,32 @@ async fn cash(
 
     sqlx::query("INSERT INTO cash_flow(id,created_at,project_id,contract_id,boq_header_id,boq_item_id,parent_main_project_id,parent_main_contract_id,payload) VALUES (?,?,?,?,?,?,?,?,?)")
         .bind(&cash_id).bind(stamp()).bind(&scope.project_id).bind(&scope.contract_id).bind(&scope.boq_header_id).bind(&scope.boq_item_id).bind(&scope.parent_main_project_id).bind(&scope.parent_main_contract_id).bind(payload.to_string())
+        .execute(&mut **tx).await.map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+async fn cash_reversal(
+    tx: &mut Transaction<'_, Sqlite>,
+    scope: &Scope,
+    source: &str,
+    day: &str,
+    number: &str,
+    amount: f64,
+    client: bool,
+) -> Result<(), String> {
+    if amount <= 0.0 { return Ok(()); }
+    let id = format!("payment_certificate_reversal:{}:{}", source, stamp());
+    let payload = json!({
+        "id": id, "date": day, "description": format!("Reversal of payment certificate {number}"),
+        "category": if client { "Client Receipt Reversal" } else { "Subcontractor Payment Reversal" },
+        "inflow": if client { 0.0 } else { money(amount) },
+        "outflow": if client { money(amount) } else { 0.0 },
+        "net": if client { money(-amount) } else { money(amount) },
+        "cumulative_balance": 0, "movement_type": "Reversal", "status": "Reversed",
+        "source_type": "payment_certificate_reversal", "source_id": source
+    });
+    sqlx::query("INSERT INTO cash_flow(id,created_at,project_id,contract_id,boq_header_id,boq_item_id,parent_main_project_id,parent_main_contract_id,payload) VALUES (?,?,?,?,?,?,?,?,?)")
+        .bind(&id).bind(stamp()).bind(&scope.project_id).bind(&scope.contract_id).bind(&scope.boq_header_id).bind(&scope.boq_item_id).bind(&scope.parent_main_project_id).bind(&scope.parent_main_contract_id).bind(payload.to_string())
         .execute(&mut **tx).await.map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -597,6 +651,10 @@ pub async fn submit_payment_certificate(
     }
 
     let mut tx = db(path).await?.begin().await.map_err(|e| e.to_string())?;
+    if let Some(result) = replay_operation(&mut tx, &r.operation_id, &r.certificate_id).await? {
+        tx.rollback().await.map_err(|e| e.to_string())?;
+        return Ok(result);
+    }
     guard(&mut tx, &r.operation_id, true).await?;
 
     let outcome = async {
@@ -632,15 +690,11 @@ pub async fn submit_payment_certificate(
 
     match outcome {
         Ok(()) => {
+            let result = CertificateOperationResult { operation_id: r.operation_id.clone(), status: "Posted".into(), certificate_status: Some("Submitted".into()), remaining_balance: None, total_paid_amount: None };
+            save_operation(&mut tx, "submit_payment_certificate", &result, &r.certificate_id).await?;
             guard(&mut tx, &r.operation_id, false).await?;
             tx.commit().await.map_err(|e| e.to_string())?;
-            Ok(CertificateOperationResult {
-                operation_id: r.operation_id,
-                status: "Posted".into(),
-                certificate_status: Some("Submitted".into()),
-                remaining_balance: None,
-                total_paid_amount: None,
-            })
+            Ok(result)
         }
         Err(e) => {
             tx.rollback().await.map_err(|x| x.to_string())?;
@@ -662,6 +716,10 @@ pub async fn approve_payment_certificate_governed(
     }
 
     let mut tx = db(path).await?.begin().await.map_err(|e| e.to_string())?;
+    if let Some(result) = replay_operation(&mut tx, &r.operation_id, &r.certificate_id).await? {
+        tx.rollback().await.map_err(|e| e.to_string())?;
+        return Ok(result);
+    }
     guard(&mut tx, &r.operation_id, true).await?;
 
     let outcome = async {
@@ -683,7 +741,32 @@ pub async fn approve_payment_certificate_governed(
             return Err("Certificate type must be Client or Subcontractor.".into());
         }
 
-        let gross = n(&v, "gross_certified_value");
+        let contract_id = scope.contract_id.clone().ok_or("Certificate contract scope is required.")?;
+        let contract_row = sqlx::query("SELECT payload FROM contracts WHERE id=?").bind(&contract_id).fetch_one(&mut *tx).await.map_err(|e| e.to_string())?;
+        let contract_payload: Value = serde_json::from_str(&contract_row.try_get::<String,_>("payload").map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+        let retention_rate = term(&contract_payload, &["retention_rate", "retentionRate"]).ok_or("Requires setup: contract retention rate is missing.")?;
+        let advance_rate = term(&contract_payload, &["advance_recovery_rate", "advanceRecoveryRate"]).unwrap_or(0.0);
+        let tax_rate = term(&contract_payload, &["tax_rate", "taxRate"]).unwrap_or(0.0);
+        let markup_rate = term(&contract_payload, &["markup_rate", "markupRate"]).unwrap_or(0.0);
+        let deductions = term(&contract_payload, &["deductions", "deduction_amount"]).unwrap_or(0.0);
+        let certificate_type = s(&v, "certificate_type");
+        let mut authoritative_items = v.get("items").cloned().and_then(|x| x.as_array().cloned()).ok_or("Certificate has no governed source items.")?;
+        let mut derived_gross = 0.0;
+        for item in &mut authoritative_items {
+            let boq_item_id = s(item, "boq_item_id");
+            let rate_key = if certificate_type == "Client" { "unit_rate" } else { "subcontract_unit_rate" };
+            let boq_row = sqlx::query("SELECT payload FROM boq_items WHERE id=?").bind(&boq_item_id).fetch_one(&mut *tx).await.map_err(|e| e.to_string())?;
+            let boq_payload: Value = serde_json::from_str(&boq_row.try_get::<String,_>("payload").map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+            let rate = n(&boq_payload, rate_key);
+            if rate <= 0.0 { return Err(format!("Missing governed {rate_key} for BOQ item {boq_item_id}.")); }
+            let quantity = item.get("wir_ids").and_then(Value::as_array).map(|ids| ids.iter().filter_map(Value::as_str).count() as f64).unwrap_or(0.0);
+            let quantity = if quantity > 0.0 { item.get("quantity").and_then(Value::as_f64).unwrap_or(0.0) } else { 0.0 };
+            if quantity <= 0.0 { return Err(format!("Certificate line {boq_item_id} has no positive governed quantity.")); }
+            let amount = money(quantity * rate); derived_gross += amount;
+            if let Some(obj) = item.as_object_mut() { obj.insert("rate".into(), json!(rate)); obj.insert("rate_source".into(), json!(format!("boq_items.payload.{rate_key}"))); obj.insert("amount".into(), json!(amount)); }
+        }
+        let gross = money(derived_gross);
+        if let Some(obj) = v.as_object_mut() { obj.insert("items".into(), Value::Array(authoritative_items)); obj.insert("gross_certified_value".into(), json!(gross)); obj.insert("retention_rate".into(), json!(retention_rate)); obj.insert("advance_recovery_rate".into(), json!(advance_rate)); obj.insert("tax_rate".into(), json!(tax_rate)); obj.insert("markup_rate".into(), json!(markup_rate)); obj.insert("deductions".into(), json!(deductions)); }
         if gross <= 0.0 {
             return Err("Payment certificate gross value must be greater than zero.".into());
         }
@@ -693,9 +776,18 @@ pub async fn approve_payment_certificate_governed(
             if contract_terms.get("back_to_back_required").and_then(Value::as_bool).unwrap_or(false) {
                 let main_contract: Option<String> = contract_row.try_get("parent_main_contract_id").map_err(|e| e.to_string())?;
                 let main_contract = main_contract.ok_or("Back-to-back term requires a linked main contract.")?;
-                let collected: f64 = sqlx::query_scalar("SELECT COALESCE(SUM(p.amount),0) FROM certificate_partial_payments p JOIN payment_certificates c ON c.id=p.certificate_id WHERE c.contract_id=? AND json_extract(c.payload,'$.certificate_type')='Client'")
-                    .bind(main_contract).fetch_one(&mut *tx).await.map_err(|e| e.to_string())?;
-                if collected <= 0.0 { return Err("Back-to-back contract term blocks subcontract approval until linked client Actual collection exists.".into()); }
+                let period_id = s(&v, "period_id");
+                let wir_ids: Vec<String> = v.get("items").and_then(Value::as_array).into_iter().flatten()
+                    .flat_map(|item| item.get("wir_ids").and_then(Value::as_array).into_iter().flatten())
+                    .filter_map(Value::as_str).map(str::to_owned).collect();
+                if wir_ids.is_empty() { return Err("Back-to-back requires governed WIR sources.".into()); }
+                let mut collected = 0.0;
+                for wir_id in wir_ids {
+                    let amount: f64 = sqlx::query_scalar("SELECT COALESCE(SUM(p.amount),0) FROM certificate_partial_payments p JOIN payment_certificates c ON c.id=p.certificate_id WHERE c.contract_id=? AND json_extract(c.payload,'$.certificate_type')='Client' AND json_extract(c.payload,'$.period_id')=? AND EXISTS (SELECT 1 FROM json_each(json_extract(c.payload,'$.items')) i, json_each(json_extract(i.value,'$.wir_ids')) w WHERE w.value=?)")
+                        .bind(&main_contract).bind(&period_id).bind(&wir_id).fetch_one(&mut *tx).await.map_err(|e| e.to_string())?;
+                    collected += amount;
+                }
+                if collected <= 0.0 { return Err("Back-to-back contract term blocks subcontract approval until matching client Actual collection exists for the same period and WIR scope.".into()); }
             }
         }
 
@@ -745,18 +837,14 @@ pub async fn approve_payment_certificate_governed(
             }
         }
 
-        let retention = money(gross * n(&v, "retention_rate") / 100.0);
-        let taxable = money(
-            gross
-                - retention
-                - n(&v, "advance_recovery")
-                - n(&v, "deductions"),
-        );
+        let retention = money(gross * retention_rate / if retention_rate > 1.0 { 100.0 } else { 1.0 });
+        let advance_recovery = money(gross * advance_rate / if advance_rate > 1.0 { 100.0 } else { 1.0 });
+        let taxable = money(gross - retention - advance_recovery - deductions);
         if taxable < -0.000001 {
             return Err("Retention, advance recovery and deductions cannot exceed gross certified value.".into());
         }
 
-        let tax = money(taxable.max(0.0) * n(&v, "tax_rate") / 100.0);
+        let tax = money(taxable.max(0.0) * tax_rate / if tax_rate > 1.0 { 100.0 } else { 1.0 });
         let net = money(taxable + tax);
         let day = if s(&v, "certificate_date").is_empty() {
             r.approved_at.clone()
@@ -814,15 +902,11 @@ pub async fn approve_payment_certificate_governed(
 
     match outcome {
         Ok(net) => {
+            let result = CertificateOperationResult { operation_id: r.operation_id.clone(), status: "Posted".into(), certificate_status: Some("Approved".into()), remaining_balance: Some(net), total_paid_amount: Some(0.0) };
+            save_operation(&mut tx, "approve_payment_certificate_governed", &result, &r.certificate_id).await?;
             guard(&mut tx, &r.operation_id, false).await?;
             tx.commit().await.map_err(|e| e.to_string())?;
-            Ok(CertificateOperationResult {
-                operation_id: r.operation_id,
-                status: "Posted".into(),
-                certificate_status: Some("Approved".into()),
-                remaining_balance: Some(net),
-                total_paid_amount: Some(0.0),
-            })
+            Ok(result)
         }
         Err(e) => {
             tx.rollback().await.map_err(|x| x.to_string())?;
@@ -956,15 +1040,11 @@ pub async fn record_partial_payment(
 
     match outcome {
         Ok((new_status, new_remaining, new_paid)) => {
+            let result = CertificateOperationResult { operation_id: r.operation_id.clone(), status: "Posted".into(), certificate_status: Some(new_status), remaining_balance: Some(new_remaining), total_paid_amount: Some(new_paid) };
+            save_operation(&mut tx, "record_partial_payment", &result, &r.certificate_id).await?;
             guard(&mut tx, &r.operation_id, false).await?;
             tx.commit().await.map_err(|e| e.to_string())?;
-            Ok(CertificateOperationResult {
-                operation_id: r.operation_id,
-                status: "Posted".into(),
-                certificate_status: Some(new_status),
-                remaining_balance: Some(new_remaining),
-                total_paid_amount: Some(new_paid),
-            })
+            Ok(result)
         }
         Err(e) => {
             tx.rollback().await.map_err(|x| x.to_string())?;
@@ -986,6 +1066,10 @@ pub async fn reverse_certificate_governed(
     }
 
     let mut tx = db(path).await?.begin().await.map_err(|e| e.to_string())?;
+    if let Some(result) = replay_operation(&mut tx, &r.operation_id, &r.certificate_id).await? {
+        tx.rollback().await.map_err(|e| e.to_string())?;
+        return Ok(result);
+    }
     guard(&mut tx, &r.operation_id, true).await?;
 
     let outcome = async {
@@ -1002,7 +1086,7 @@ pub async fn reverse_certificate_governed(
 
         // Locks and payment history are append-only. A reversal records a
         // linked compensating entry instead of deleting the source lock.
-        let locked = sqlx::query("SELECT wir_id,stream FROM wir_certification_lock WHERE certificate_id=?")
+        let locked = sqlx::query("SELECT wir_id,stream FROM wir_certification_lock WHERE certificate_id=? AND reversed_at IS NULL")
             .bind(&r.certificate_id).fetch_all(&mut *tx).await.map_err(|e| e.to_string())?;
         for row in locked {
             let wir_id: String = row.try_get("wir_id").map_err(|e| e.to_string())?;
@@ -1025,20 +1109,18 @@ pub async fn reverse_certificate_governed(
         put(&mut tx, &r.certificate_id, &v).await?;
         synchronize_invoice_tracking(&mut tx, &v, None, Some("Reversed")).await?;
 
-        // Revert cash flow
-        cash(
-            &mut tx,
-            &scope,
-            &r.certificate_id,
-            "",
-            &s(&v, "certificate_number"),
-            "Reversed",
-            "Reversed",
-            0.0,
-            false,
-            None,
-        )
-        .await?;
+        // Revert forecast and every actual payment with append-only compensating cash entries.
+        let client = s(&v, "certificate_type") == "Client";
+        let original_net = n(&v, "net_certified_value");
+        cash_reversal(&mut tx, &scope, &r.certificate_id, &stamp(), &s(&v, "certificate_number"), original_net, client).await?;
+        let payments = sqlx::query("SELECT payment_id,amount,payment_date FROM certificate_partial_payments WHERE certificate_id=?")
+            .bind(&r.certificate_id).fetch_all(&mut *tx).await.map_err(|e| e.to_string())?;
+        for payment in payments {
+            let payment_id: String = payment.try_get("payment_id").map_err(|e| e.to_string())?;
+            let amount: f64 = payment.try_get("amount").map_err(|e| e.to_string())?;
+            let payment_date: String = payment.try_get("payment_date").map_err(|e| e.to_string())?;
+            cash_reversal(&mut tx, &scope, &format!("{}:{}", r.certificate_id, payment_id), &payment_date, &s(&v, "certificate_number"), amount, client).await?;
+        }
 
         post(
             &mut tx,
@@ -1058,15 +1140,11 @@ pub async fn reverse_certificate_governed(
 
     match outcome {
         Ok(()) => {
+            let result = CertificateOperationResult { operation_id: r.operation_id.clone(), status: "Posted".into(), certificate_status: Some("Reversed".into()), remaining_balance: Some(0.0), total_paid_amount: None };
+            save_operation(&mut tx, "reverse_certificate_governed", &result, &r.certificate_id).await?;
             guard(&mut tx, &r.operation_id, false).await?;
             tx.commit().await.map_err(|e| e.to_string())?;
-            Ok(CertificateOperationResult {
-                operation_id: r.operation_id,
-                status: "Posted".into(),
-                certificate_status: Some("Reversed".into()),
-                remaining_balance: Some(0.0),
-                total_paid_amount: None,
-            })
+            Ok(result)
         }
         Err(e) => {
             tx.rollback().await.map_err(|x| x.to_string())?;
