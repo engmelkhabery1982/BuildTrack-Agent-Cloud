@@ -315,3 +315,73 @@ Claims/W03 وCash Forecast/W05 وDashboard وReports وPrimavera وملفات ا
 أي ملف غير مدرج يظهر في diff دون سبب مسجل يفشل بوابة التسليم. القراءة المشروطة لا
 تعطي إذن تعديل؛ الملفات المسموح تعديلها هي فقط التي تستلزمها المواصفة والـdependency
 المثبتة، مع `DELETE_ALLOWLIST: []`.
+
+## RP-D1-E2E — W13 القبول العابر
+
+- READ/MODIFY: `tests/fixtures/referenceProjectAcceptance.mjs`,
+  `tests/reference-project-acceptance.test.mjs`, `tests/kpi-source-drilldown-reconciliation.test.mjs`.
+- READ ONLY بالمقاطع المستدعاة: `src/utils/kpiReconciliation.ts`,
+  `src/utils/controlAccountSummary.ts`, `src/utils/quantityLedger.ts`.
+- لا تعدّل production لإجبار fixture على النجاح؛ أي فجوة production تسجل لبطاقتها الأصلية.
+
+## RP-D2-SCOPE — W14–W26
+
+- READ/MODIFY حسب رمز الميزة فقط: `src/data/codeControls.ts`, `src/data/hierarchyRules.ts`,
+  `src/utils/scopeGovernance.ts`, `src/utils/scopeReconciliation.ts`,
+  `src/data/contractScope.ts`, `src/data/contractRules.ts`.
+- SHARED SECTIONS ONLY: WBS/BOQ/Contract/Variation في `src/types/index.ts`,
+  `src/data/dataDictionary.ts`, `src/data/sqliteRepository.ts`, `src/hooks/useData.ts`,
+  وآخر migration/command المطابق في `src-tauri/src/lib.rs`.
+- TESTS: `tests/contract-schedule-wir-acceptance-20260825.test.mjs`,
+  `tests/phase1-commercial.test.mjs`, `tests/control-account-migration.test.mjs` بالمقاطع المطابقة.
+
+## RP-D3-SCHEDULE — W27–W39
+
+- READ/MODIFY: `src/utils/cpm.ts`, `src/utils/schedulePlanning.ts`,
+  `src/utils/scheduleVersioning.ts`, `src/data/baselineGovernance.ts`,
+  `src/components/ScheduleVersionModal.tsx`, `src/components/ThreeWayGanttOverlay.tsx`.
+- SHARED SECTIONS ONLY: Schedule/Calendar/Activity في types/dictionary/repository/hooks/lib/App.
+- TESTS: `tests/schedule-versioning.test.mjs`, `tests/baseline-current-forecast.test.mjs`,
+  `tests/gantt-overlay-engine.test.mjs`, `tests/fragnet-tia-engine.test.mjs` حسب الميزة.
+
+## RP-D4-COST — W40–W52
+
+- READ/MODIFY: `src/utils/controlAccountSummary.ts`, `src/utils/costPlanPhasing.ts`,
+  `src/utils/costVariance.ts`, `src/utils/overheadAllocation.ts`,
+  `src/data/costPlanVersioning.ts`, `src/data/estimateVersioning.ts`,
+  `src-tauri/src/cost_plan_versioning.rs`, `src-tauri/src/estimate_versioning.rs`.
+- SHARED SECTIONS ONLY: Cost/CBS/ControlAccount/PO/GRN/AP/FX في types/dictionary/repository/hooks/lib/App.
+- TESTS: `tests/control-account-time-phasing-overhead.test.mjs`, `tests/cost-plan-phasing.test.mjs`,
+  `tests/eac-multi-method.test.mjs`, `tests/financial-ledger-migration.test.mjs` حسب الميزة.
+
+## RP-D5-PROGRESS — W53–W65
+
+- READ/MODIFY: `src/utils/quantityLedger.ts`, `src/utils/evm.ts`,
+  `src/utils/earnedSchedule.ts`, `src/utils/resourceProductivity.ts`,
+  `src/utils/kpiReconciliation.ts`, `src/utils/varianceActionRegister.ts`.
+- SHARED SECTIONS ONLY: WIR/Progress/BOQ/Activity/EVM في types/dictionary/repository/hooks/lib/App.
+- TESTS: `tests/evm.test.mjs`, `tests/variance-action-register.test.mjs`,
+  `tests/kpi-source-drilldown-reconciliation.test.mjs`,
+  `tests/contract-schedule-wir-acceptance-20260825.test.mjs` حسب الميزة.
+
+## RP-D6-IMPORT — W66–W78
+
+- READ/MODIFY: `src/data/governedImport.ts`, `src/data/primaveraImport.ts`,
+  `src/utils/primaveraReconciliation.ts`, `src/utils/xerEngine.ts`,
+  `src/components/XerReconciliationBoard.tsx`, `src-tauri/src/import_batch.rs`.
+- SHARED SECTIONS ONLY: import mappings في dictionary/repository/types/hooks/lib/App.
+- TESTS: `tests/primavera-reconciliation.test.mjs`,
+  `tests/contract-schedule-wir-acceptance-20260825.test.mjs`، واختبارات Rust داخل `import_batch.rs`.
+
+## RP-D7-GOVERNANCE — W79–W90
+
+- READ/MODIFY حسب الميزة: `src/data/governanceRules.ts`,
+  `src/data/reportingPeriodGovernance.ts`, `src/data/dataQuality.ts`,
+  `src/components/DataQualityChecks.tsx`, `src/components/AuditTrailExplorer.tsx`,
+  `src/data/reportVersioning.ts`, `src-tauri/src/report_versioning.rs`.
+- SHARED SECTIONS ONLY: User/Role/Period/Audit/Backup/Report في types/dictionary/repository/hooks/lib/App.
+- TESTS: `tests/phase0-governance.test.mjs`, `tests/agent-cloud-integration-gates.test.mjs`,
+  `tests/reference-project-acceptance.test.mjs`, `tests/tauri-command-registration.test.mjs` حسب الميزة.
+
+لكل حزمة: لا تقرأ كل الملفات معًا. سطر Wxx هو مفتاح البحث؛ ابدأ بملفين رئيسيين واختبار،
+ثم افتح dependency من القائمة فقط عند وجود import/schema/call مباشر.

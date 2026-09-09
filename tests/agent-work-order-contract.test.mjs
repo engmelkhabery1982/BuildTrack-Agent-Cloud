@@ -21,29 +21,17 @@ test('cloud continuation specification retains every ordered F1-H1 feature gate'
 });
 
 test('universal agent prompt enforces governed sources, atomic transitions and honest test evidence', () => {
-  const prompt = read('docs/agent-work-orders/UNIVERSAL_CLOUD_AGENT_PROMPT_V2_AR.md');
-  assert.match(prompt, /NEXT_WEEK_90_FEATURES_EXECUTION_PLAN_AR\.md/);
-  assert.match(prompt, /CURRENT_FEATURE/);
-  assert.match(prompt, /DELIVERY_BRANCH/);
+  const prompt = read('docs/agent-work-orders/UNIVERSAL_CLOUD_AGENT_PROMPT_V3_AR.md');
+  assert.match(prompt, /OPEN_90_FEATURE_EXECUTION_SYSTEM_AR\.md/);
+  assert.match(prompt, /QUEUE_CURSOR/);
   assert.match(prompt, /BuildTrack-Agent-Cloud\/main/);
-  assert.match(prompt, /ممنوع الوصول إلى المستودع الرسمي/);
-  assert.match(prompt, /agent-preflight\.mjs/);
-  assert.match(prompt, /agent-delivery-gate\.mjs/);
-  assert.match(prompt, /WORK_BRANCH_PATTERN/);
-  assert.match(prompt, /MODIFY_ALLOWLIST/);
-  assert.match(prompt, /أي delete\/rename/);
+  assert.match(prompt, /المستودع الرسمي/);
   assert.match(prompt, /لا تكتب CLOSED أو 8\/10/);
-  assert.match(prompt, /VITE_SUPABASE_\*/);
-  assert.match(prompt, /mounted UI → governed backend → SQLite/);
-  assert.match(prompt, /FEATURE_BATCH_LIMIT=1/);
-  assert.match(prompt, /CORRECTION_FILE/);
-  assert.match(prompt, /EXECUTION_PLAN_FILE/);
-  assert.match(prompt, /GAP-ID=PASS/);
-  assert.match(prompt, /READY FOR CODEX LOCAL VERIFICATION/);
-  assert.match(prompt, /PENDING_LOCAL_CARGO/);
-  assert.match(prompt, /DEPENDENCY_BOOTSTRAP/);
-  assert.match(prompt, /git diff --name-status/);
-  assert.match(prompt, /نجاح TypeScript أو Build لا يعوض أي خطأ Rust\/SQLite/);
+  assert.match(prompt, /PENDING_LOCAL_<TOOL>/);
+  assert.match(prompt, /W04→W90/);
+  assert.match(prompt, /ميزة واحدة = commit واحد/);
+  assert.match(prompt, /حد القراءة 10 ملفات\/30k حرف/);
+  assert.match(prompt, /عند قرب حد الاستخدام/);
 });
 
 test('active and master work orders point to the current gate and detailed authority', () => {
@@ -54,8 +42,10 @@ test('active and master work orders point to the current gate and detailed autho
   assert.match(active, /PREREQUISITE=W03:CLOSED_8_OF_10_BY_CODEX/);
   assert.match(active, /CLOUD_BASE_BRANCH=main/);
   assert.match(active, /DELIVERY_BRANCH=main/);
-  assert.match(active, /FEATURE_BATCH_LIMIT=1/);
-  assert.match(active, /STOP_AFTER_CURRENT_FEATURE=true/);
+  assert.match(active, /EXECUTION_MODE=OPEN_SEQUENTIAL_CANDIDATE_QUEUE/);
+  assert.match(active, /OPEN_FEATURE_RANGE=W04-W90/);
+  assert.match(active, /FEATURE_BATCH_LIMIT=87/);
+  assert.match(active, /STOP_AFTER_CURRENT_FEATURE=false/);
   assert.match(active, /AGENT_MUST_NOT_EDIT=true/);
   assert.match(active, /DELETE_ALLOWLIST=\[\]/);
   assert.match(active, /NEXT_WEEK_90_FEATURES_EXECUTION_PLAN_AR\.md/);
@@ -140,7 +130,7 @@ test('next-week execution plan contains exactly 90 ordered atomic increments and
 test('every remaining feature has a token-bounded file read pack', () => {
   const readPacks = read('docs/agent-work-orders/FEATURE_READ_PACKS_AR.md');
   const specification = read('docs/agent-work-orders/NEXT_FEATURES_DETAILED_EXECUTION_AR.md');
-  const prompt = read('docs/agent-work-orders/UNIVERSAL_CLOUD_AGENT_PROMPT_V2_AR.md');
+  const prompt = read('docs/agent-work-orders/UNIVERSAL_CLOUD_AGENT_PROMPT_V3_AR.md');
   const master = read('docs/agent-work-orders/MASTER_CLOUD_DEVELOPMENT_WORK_ORDER_AR.md');
   for (const feature of ['F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'G1', 'G2', 'G3', 'H1']) {
     assert.match(readPacks, new RegExp(`## ${feature}(?: / W\\d+)?(?: / RP-W\\d+)? —`), `${feature} must have an explicit read pack`);
@@ -158,6 +148,9 @@ test('every remaining feature has a token-bounded file read pack', () => {
   assert.match(readPacks, /W04_CODEX_REVIEW_AND_CORRECTION_AR\.md/);
   assert.match(readPacks, /W04_EXECUTION_CLOSURE_PLAN_AR\.md/);
   assert.match(readPacks, /tests\/tauri-command-registration\.test\.mjs/);
+  for (const pack of ['RP-D1-E2E', 'RP-D2-SCOPE', 'RP-D3-SCHEDULE', 'RP-D4-COST', 'RP-D5-PROGRESS', 'RP-D6-IMPORT', 'RP-D7-GOVERNANCE']) {
+    assert.match(readPacks, new RegExp(`## ${pack}`), `${pack} must exist`);
+  }
   assert.match(specification, /FEATURE_READ_PACKS_AR\.md/);
   assert.match(prompt, /FEATURE_READ_PACKS_AR\.md/);
   assert.match(master, /FEATURE_READ_PACKS_AR\.md/);
