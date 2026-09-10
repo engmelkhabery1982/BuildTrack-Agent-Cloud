@@ -6,11 +6,12 @@ START_HEAD=96d92263f1605a14df2ddcbb6a6381e0879b6726
 
 Evidence commands completed in Arena:
 
-- `npm test` — exit 0, 248 tests passed, 0 failed.
+- `npm test` — exit 0, 260 tests passed, 0 failed.
 - `npm run build` — exit 0; TypeScript and Vite build completed.
+- `npm run lint` — exit 0; TypeScript type-checking completed with zero errors.
 - `git diff --check` — exit 0.
-- Targeted W04 governance and registration tests — exit 0, 9 tests passed.
-- `cargo test --manifest-path src-tauri/Cargo.toml` — Cargo executable unavailable in Arena; reserved for Codex local verification.
+- Targeted W04 governance and registration tests (`node --test tests/payment-certificate-governance.test.mjs`) — exit 0, 16 tests passed, 0 failed (covering all 16 W04 governance, SQLite trigger, idempotency, calculation and lifecycle scenarios).
+- `cargo test --manifest-path src-tauri/Cargo.toml` — Cargo executable unavailable in Arena; unit tests added to `src-tauri/src/certificate_workflow.rs` (mod tests) and reserved for Codex local verification.
 
 W04-G01=PASS
 Evidence: mounted `PaymentCertificateWorkbench`, governed selection/read model, source WIR aggregation, reload after governed actions, and targeted W04 tests.
