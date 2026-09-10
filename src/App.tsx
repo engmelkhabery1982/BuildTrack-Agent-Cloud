@@ -2457,6 +2457,7 @@ function AppWorkspace() {
           resourceMasters={data.resourceMasters as Record<string, any>[]}
           scheduleResourceAssignments={data.scheduleResourceAssignments as Record<string, any>[]}
           workCalendars={data.workCalendars as Record<string, any>[]}
+          paymentCertificates={data.paymentCertificates}
           onDataReload={data.reload}
           onNavigate={setActiveView}
         />

@@ -58,6 +58,7 @@ interface DashboardProps {
   resourceMasters: Record<string, any>[];
   scheduleResourceAssignments: Record<string, any>[];
   workCalendars: Record<string, any>[];
+  paymentCertificates?: any[];
   onNavigate: (view: ViewKey) => void;
   onDataReload?: () => Promise<void>;
 }
@@ -107,7 +108,7 @@ type DashboardTab = 'overview' | 'report' | 'financials' | 'schedule' | 'safety'
 
 export function Dashboard({
   projects, tasks, costs, costEntries, procurement, procurementReceipts, safety, progress, schedules, contracts,
-  boqHeaders, boqItems, contractSovLines, controlAccounts, costPlanVersions, cashFlow, subInvoices, clientInvoices, variations, documents, wirEntries, progressCorrections, baselines, reportingPeriods, governanceRegister, scheduleDistributions, rfis, submittals, quality, resourceMasters, scheduleResourceAssignments, workCalendars, onNavigate, onDataReload,
+  boqHeaders, boqItems, contractSovLines, controlAccounts, costPlanVersions, cashFlow, subInvoices, clientInvoices, variations, documents, wirEntries, progressCorrections, baselines, reportingPeriods, governanceRegister, scheduleDistributions, rfis, submittals, quality, resourceMasters, scheduleResourceAssignments, workCalendars, paymentCertificates = [], onNavigate, onDataReload,
 }: DashboardProps) {
   const [activeTab, setActiveTab] = useState<DashboardTab>('overview');
   const [searchQuery, setSearchQuery] = useState('');
@@ -1460,7 +1461,17 @@ export function Dashboard({
                   <p className="text-xs text-neutral-400">Monthly time-phased liquidity projection, planned vs. actual cash positions</p>
                 </div>
               </div>
-              <CashFlowForecastBoard data={cashFlowData} currency={projectCurrency || '$'} />
+              <CashFlowForecastBoard
+                data={cashFlowData}
+                projectId={selectedProjectId !== 'all' ? selectedProjectId : (projects[0]?.id || 'PRJ-ALL')}
+                projectName={selectedProject?.name || 'Consolidated Projects'}
+                dataDate={reportDate}
+                paymentCertificates={paymentCertificates}
+                supplierInvoices={subInvoices}
+                procurement={procurement}
+                cashFlow={cashFlow}
+                currency={projectCurrency || '$'}
+              />
             </div>
 
             {/* Invoices + Variations */}

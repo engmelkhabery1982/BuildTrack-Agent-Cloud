@@ -2,6 +2,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use tauri::Manager;
 
+mod cash_forecast_workflow;
 mod claims_workflow;
 mod certificate_workflow;
 mod commercial_workflow;
@@ -244,6 +245,42 @@ async fn get_certificate_partial_payments(
 ) -> Result<Vec<certificate_workflow::PartialPaymentRecord>, String> {
     let path = app.path().app_config_dir().map_err(|error| error.to_string())?.join("buildtrack.db");
     certificate_workflow::get_certificate_partial_payments(&path, request.certificate_id).await
+}
+
+#[tauri::command]
+async fn save_cash_forecast_version(
+    app: tauri::AppHandle,
+    request: cash_forecast_workflow::SaveCashForecastVersionRequest,
+) -> Result<cash_forecast_workflow::CashForecastVersionResult, String> {
+    let path = app.path().app_config_dir().map_err(|error| error.to_string())?.join("buildtrack.db");
+    cash_forecast_workflow::save_cash_forecast_version(&path, request).await
+}
+
+#[tauri::command]
+async fn approve_cash_forecast_version(
+    app: tauri::AppHandle,
+    request: cash_forecast_workflow::ApproveCashForecastVersionRequest,
+) -> Result<cash_forecast_workflow::CashForecastVersionResult, String> {
+    let path = app.path().app_config_dir().map_err(|error| error.to_string())?.join("buildtrack.db");
+    cash_forecast_workflow::approve_cash_forecast_version(&path, request).await
+}
+
+#[tauri::command]
+async fn reopen_cash_forecast_version(
+    app: tauri::AppHandle,
+    request: cash_forecast_workflow::ReopenCashForecastVersionRequest,
+) -> Result<cash_forecast_workflow::CashForecastVersionResult, String> {
+    let path = app.path().app_config_dir().map_err(|error| error.to_string())?.join("buildtrack.db");
+    cash_forecast_workflow::reopen_cash_forecast_version(&path, request).await
+}
+
+#[tauri::command]
+async fn get_cash_forecast_version(
+    app: tauri::AppHandle,
+    request: cash_forecast_workflow::GetCashForecastVersionRequest,
+) -> Result<cash_forecast_workflow::CashForecastVersionResult, String> {
+    let path = app.path().app_config_dir().map_err(|error| error.to_string())?.join("buildtrack.db");
+    cash_forecast_workflow::get_cash_forecast_version(&path, request).await
 }
 
 #[tauri::command]
@@ -3671,6 +3708,38 @@ pub fn run() {
             "#,
             kind: tauri_plugin_sql::MigrationKind::Up,
         },
+        tauri_plugin_sql::Migration {
+            version: 77,
+            description: "govern_versioned_cash_forecast_workflow_and_guards",
+            sql: r#"
+              CREATE TABLE IF NOT EXISTS cash_forecast_mutation_guard (
+                operation_id TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL
+              );
+
+              CREATE TABLE IF NOT EXISTS cash_forecast_operation_results (
+                operation_id TEXT PRIMARY KEY,
+                version_id TEXT NOT NULL,
+                command TEXT NOT NULL,
+                result_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (version_id) REFERENCES cash_forecast_versions(id) ON DELETE RESTRICT
+              );
+
+              CREATE TRIGGER IF NOT EXISTS cash_forecast_versions_governed_update_guard
+              BEFORE UPDATE ON cash_forecast_versions
+              WHEN OLD.status IN ('Approved', 'Archived', 'Superseded')
+                AND NOT EXISTS (SELECT 1 FROM cash_forecast_mutation_guard WHERE operation_id LIKE 'internal:cash_forecast:%')
+              BEGIN SELECT RAISE(ABORT, 'Governed cash forecast version status changes require a lifecycle transaction.'); END;
+
+              CREATE TRIGGER IF NOT EXISTS cash_forecast_versions_governed_delete_guard
+              BEFORE DELETE ON cash_forecast_versions
+              WHEN OLD.status <> 'Draft'
+                AND NOT EXISTS (SELECT 1 FROM cash_forecast_mutation_guard WHERE operation_id LIKE 'internal:cash_forecast:%')
+              BEGIN SELECT RAISE(ABORT, 'Only Draft cash forecast versions may be deleted.'); END;
+            "#,
+            kind: tauri_plugin_sql::MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()
@@ -3706,6 +3775,10 @@ pub fn run() {
             settle_payment_certificate,
             reverse_commercial_posting,
             reverse_variation,
+            save_cash_forecast_version,
+            approve_cash_forecast_version,
+            reopen_cash_forecast_version,
+            get_cash_forecast_version,
             issue_report_version,
             approve_report_template,
             approve_cost_plan_version,

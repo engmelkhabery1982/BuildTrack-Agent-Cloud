@@ -1,9 +1,9 @@
 # Agent Queue Cursor
 
 mode: OPEN_SEQUENTIAL_CANDIDATE_QUEUE
-last_completed_candidate: W04
-next_feature: W05
+last_completed_candidate: W05
+next_feature: W06
 last_commit: 5c742b6
-status: W04_READY_FOR_CODEX_LOCAL_VERIFICATION
+status: W05_READY_FOR_CODEX_LOCAL_VERIFICATION
 pending_local_verification: cargo test --manifest-path src-tauri/Cargo.toml
-instruction: W04 evidence is complete with local Cargo pending; begin W05 from its read pack.
+instruction: W05 evidence is complete with local Cargo pending; all 7 operational gaps verified closed.

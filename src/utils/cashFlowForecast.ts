@@ -183,3 +183,374 @@ export function compareCashForecastVersions(
   };
 }
 
+export interface CashItemDetail {
+  sourceId: string;
+  sourceType: string;
+  description: string;
+  date: string;
+  direction: 'Inflow' | 'Outflow';
+  movementType: 'Actual' | 'Forecast';
+  amount: number;
+}
+
+export interface CashForecastBucket {
+  period: string;
+  actualInflow: number;
+  actualOutflow: number;
+  netActual: number;
+  forecastInflow: number;
+  forecastOutflow: number;
+  netForecast: number;
+  plannedInflow: number;
+  plannedOutflow: number;
+  netPlanned: number;
+  netCash: number;
+  cumulativeCash: number;
+  items: CashItemDetail[];
+}
+
+export interface CashForecastSummary {
+  totalActualInflow: number;
+  totalActualOutflow: number;
+  totalForecastInflow: number;
+  totalForecastOutflow: number;
+  closingCash: number;
+  peakWorkingCapitalDeficit: number;
+  lowestPeriod: string;
+  fundingRequiredDate?: string | null;
+}
+
+export interface BuildForecastParams {
+  projectId: string;
+  dataDate: string;
+  scenario?: 'Base' | 'Optimistic' | 'Pessimistic';
+  assumptions?: Partial<CashForecastAssumptions>;
+  paymentCertificates?: any[];
+  partialPayments?: any[];
+  supplierInvoices?: any[];
+  procurement?: any[];
+  cashFlow?: any[];
+}
+
+function addDaysIso(dateStr: string, days: number): string {
+  const parts = dateStr.split('-');
+  if (parts.length !== 3) return dateStr;
+  const y = parseInt(parts[0], 10) || 2026;
+  const m = parseInt(parts[1], 10) || 1;
+  const d = parseInt(parts[2], 10) || 1;
+  const date = new Date(Date.UTC(y, m - 1, d));
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().split('T')[0];
+}
+
+function toPeriod(dateStr: string): string {
+  return dateStr.length >= 7 ? dateStr.substring(0, 7) : '2026-01';
+}
+
+export function buildVersionedCashForecast(params: BuildForecastParams): {
+  items: CashItemDetail[];
+  buckets: CashForecastBucket[];
+  summary: CashForecastSummary;
+} {
+  const {
+    projectId,
+    dataDate,
+    scenario = 'Base',
+    assumptions = DEFAULT_CASH_ASSUMPTIONS,
+    paymentCertificates = [],
+    partialPayments = [],
+    supplierInvoices = [],
+    procurement = [],
+    cashFlow = [],
+  } = params;
+
+  const clientLag = assumptions.clientPaymentLagDays ?? 60;
+  const subLag = assumptions.subcontractorPaymentLagDays ?? 30;
+  const advRate = assumptions.advanceRecoveryRatePercent ?? 10;
+  const contingencyRate = assumptions.contingencyDrawdownPercent ?? 0;
+
+  const items: CashItemDetail[] = [];
+
+  // 1. Payment Certificates (Approved, Partially Paid, Paid)
+  const relevantCerts = paymentCertificates.filter((c: any) => {
+    const pId = c.projectId ?? c.project_id;
+    const status = c.status ?? c.payload?.status;
+    return (!projectId || pId === projectId) && ['Approved', 'Partially Paid', 'Paid'].includes(status);
+  });
+
+  relevantCerts.forEach((cert: any) => {
+    const certId = cert.id;
+    const certType = cert.certificateType ?? cert.certificate_type ?? cert.payload?.certificate_type ?? 'Client';
+    const isClient = certType === 'Client';
+    const direction: 'Inflow' | 'Outflow' = isClient ? 'Inflow' : 'Outflow';
+
+    const netValue = Number(
+      cert.netCertifiedValue ??
+      cert.net_certified_value ??
+      cert.net_payable ??
+      cert.payload?.net_certified_value ??
+      cert.grossCertifiedValue ??
+      cert.gross_certified_value ??
+      0
+    );
+
+    const certDate = cert.certificateDate ?? cert.certificate_date ?? cert.periodId ?? cert.period_id ?? dataDate;
+
+    // Filter partial payments
+    const certPayments = partialPayments.filter((p: any) => (p.certificateId ?? p.certificate_id) === certId);
+    let totalPaid = 0;
+
+    certPayments.forEach((p: any) => {
+      const pId = p.paymentId ?? p.payment_id ?? p.id;
+      const pDate = p.paymentDate ?? p.payment_date;
+      const pAmt = Number(p.amount ?? 0);
+      totalPaid += pAmt;
+
+      const movementType = pDate <= dataDate ? 'Actual' : 'Forecast';
+      items.push({
+        sourceId: pId,
+        sourceType: 'certificate_partial_payment',
+        description: `Partial payment for certificate ${certId}`,
+        date: pDate,
+        direction,
+        movementType,
+        amount: Math.round(pAmt * 100) / 100,
+      });
+    });
+
+    const remaining = Math.round((netValue - totalPaid) * 100) / 100;
+    if (remaining > 0.009) {
+      let lagDays = isClient ? clientLag : subLag;
+      if (scenario === 'Pessimistic' && isClient) lagDays += 30;
+      if (scenario === 'Optimistic' && isClient) lagDays = Math.max(0, lagDays - 15);
+
+      let dueDate = addDaysIso(certDate, lagDays);
+      if (dueDate <= dataDate) {
+        dueDate = addDaysIso(dataDate, 1);
+      }
+
+      const adjustedRemaining = isClient
+        ? remaining * (1 - Math.min(1, Math.max(0, advRate / 100)))
+        : remaining * (1 + Math.max(0, contingencyRate / 100));
+
+      items.push({
+        sourceId: certId,
+        sourceType: 'payment_certificate_balance',
+        description: `Projected balance for certificate ${certId}`,
+        date: dueDate,
+        direction,
+        movementType: 'Forecast',
+        amount: Math.round(adjustedRemaining * 100) / 100,
+      });
+    }
+  });
+
+  // 2. Supplier Invoices
+  const relevantInvoices = supplierInvoices.filter((inv: any) => {
+    const pId = inv.projectId ?? inv.project_id;
+    const status = inv.status ?? inv.payload?.status;
+    return (!projectId || pId === projectId) && ['Approved', 'Partially Paid', 'Paid'].includes(status);
+  });
+
+  relevantInvoices.forEach((inv: any) => {
+    const invId = inv.id;
+    const total = Number(inv.totalAmount ?? inv.total_amount ?? inv.amount ?? 0);
+    const paid = Number(inv.paidAmount ?? inv.paid_amount ?? 0);
+    const invDate = inv.invoiceDate ?? inv.invoice_date ?? dataDate;
+
+    if (paid > 0.009) {
+      const paidDate = inv.paidDate ?? inv.paid_date ?? invDate;
+      items.push({
+        sourceId: `ap_paid:${invId}`,
+        sourceType: 'supplier_invoice_payment',
+        description: `Settled supplier invoice ${invId}`,
+        date: paidDate,
+        direction: 'Outflow',
+        movementType: paidDate <= dataDate ? 'Actual' : 'Forecast',
+        amount: Math.round(paid * 100) / 100,
+      });
+    }
+
+    const remaining = Math.round((total - paid) * 100) / 100;
+    if (remaining > 0.009) {
+      let dueDate = addDaysIso(invDate, subLag);
+      if (dueDate <= dataDate) dueDate = addDaysIso(dataDate, 1);
+      items.push({
+        sourceId: invId,
+        sourceType: 'supplier_invoice_balance',
+        description: `Projected supplier invoice ${invId}`,
+        date: dueDate,
+        direction: 'Outflow',
+        movementType: 'Forecast',
+        amount: remaining,
+      });
+    }
+  });
+
+  // 3. Procurement POs
+  const relevantPOs = procurement.filter((po: any) => {
+    const pId = po.projectId ?? po.project_id;
+    const status = po.status ?? po.payload?.status;
+    return (!projectId || pId === projectId) && ['Ordered', 'Partially Delivered'].includes(status);
+  });
+
+  relevantPOs.forEach((po: any) => {
+    const poId = po.id;
+    const total = Number(po.totalAmount ?? po.total_amount ?? po.amount ?? 0);
+    const poDate = po.orderDate ?? po.order_date ?? dataDate;
+    if (total > 0.009) {
+      items.push({
+        sourceId: poId,
+        sourceType: 'purchase_order_commitment',
+        description: `PO Commitment ${poId}`,
+        date: addDaysIso(poDate, subLag),
+        direction: 'Outflow',
+        movementType: 'Forecast',
+        amount: Math.round(total * 100) / 100,
+      });
+    }
+  });
+
+  // 4. Standalone cash flow movements
+  const directCash = cashFlow.filter((cf: any) => {
+    const pId = cf.projectId ?? cf.project_id;
+    const status = cf.status ?? cf.payload?.status;
+    const sType = cf.sourceType ?? cf.source_type ?? '';
+    return (
+      (!projectId || pId === projectId) &&
+      !['Cancelled', 'Rejected', 'Reversed'].includes(status) &&
+      !['certificate', 'payment_certificate', 'procurement_forecast', 'supplier_invoice'].includes(sType)
+    );
+  });
+
+  directCash.forEach((cf: any) => {
+    const cId = cf.id;
+    const date = cf.date ?? dataDate;
+    const inflow = Number(cf.inflow ?? 0);
+    const outflow = Number(cf.outflow ?? 0);
+    const movementType = date <= dataDate ? 'Actual' : 'Forecast';
+
+    if (inflow > 0.009) {
+      items.push({
+        sourceId: cId,
+        sourceType: 'cash_flow_inflow',
+        description: cf.description ?? 'Manual Inflow',
+        date,
+        direction: 'Inflow',
+        movementType,
+        amount: Math.round(inflow * 100) / 100,
+      });
+    }
+    if (outflow > 0.009) {
+      items.push({
+        sourceId: cId,
+        sourceType: 'cash_flow_outflow',
+        description: cf.description ?? 'Manual Outflow',
+        date,
+        direction: 'Outflow',
+        movementType,
+        amount: Math.round(outflow * 100) / 100,
+      });
+    }
+  });
+
+  // 5. Aggregate into calendar monthly periods
+  const periodMap = new Map<string, CashItemDetail[]>();
+  items.forEach((item) => {
+    const p = toPeriod(item.date);
+    if (!periodMap.has(p)) periodMap.set(p, []);
+    periodMap.get(p)!.push(item);
+  });
+
+  const sortedPeriods = Array.from(periodMap.keys()).sort();
+  if (sortedPeriods.length === 0) {
+    sortedPeriods.push(toPeriod(dataDate));
+    periodMap.set(toPeriod(dataDate), []);
+  }
+
+  const buckets: CashForecastBucket[] = [];
+  let runningCash = 0;
+  let minCash = 0;
+  let lowestPeriod = sortedPeriods[0];
+  let fundingRequiredDate: string | null = null;
+
+  let sumActIn = 0;
+  let sumActOut = 0;
+  let sumFIn = 0;
+  let sumFOut = 0;
+
+  sortedPeriods.forEach((period) => {
+    const pItems = periodMap.get(period) || [];
+    let actIn = 0;
+    let actOut = 0;
+    let fIn = 0;
+    let fOut = 0;
+
+    pItems.forEach((it) => {
+      if (it.movementType === 'Actual') {
+        if (it.direction === 'Inflow') actIn += it.amount;
+        else actOut += it.amount;
+      } else {
+        if (it.direction === 'Inflow') fIn += it.amount;
+        else fOut += it.amount;
+      }
+    });
+
+    actIn = Math.round(actIn * 100) / 100;
+    actOut = Math.round(actOut * 100) / 100;
+    fIn = Math.round(fIn * 100) / 100;
+    fOut = Math.round(fOut * 100) / 100;
+
+    const netAct = Math.round((actIn - actOut) * 100) / 100;
+    const netF = Math.round((fIn - fOut) * 100) / 100;
+    const netP = Math.round(((actIn + fIn) - (actOut + fOut)) * 100) / 100;
+    const netC = Math.round((netAct + netF) * 100) / 100;
+
+    runningCash = Math.round((runningCash + netC) * 100) / 100;
+
+    if (runningCash < minCash) {
+      minCash = runningCash;
+      lowestPeriod = period;
+    }
+
+    if (runningCash < 0 && !fundingRequiredDate) {
+      fundingRequiredDate = period;
+    }
+
+    sumActIn += actIn;
+    sumActOut += actOut;
+    sumFIn += fIn;
+    sumFOut += fOut;
+
+    buckets.push({
+      period,
+      actualInflow: actIn,
+      actualOutflow: actOut,
+      netActual: netAct,
+      forecastInflow: fIn,
+      forecastOutflow: fOut,
+      netForecast: netF,
+      plannedInflow: Math.round((actIn + fIn) * 100) / 100,
+      plannedOutflow: Math.round((actOut + fOut) * 100) / 100,
+      netPlanned: netP,
+      netCash: netC,
+      cumulativeCash: runningCash,
+      items: pItems,
+    });
+  });
+
+  const summary: CashForecastSummary = {
+    totalActualInflow: Math.round(sumActIn * 100) / 100,
+    totalActualOutflow: Math.round(sumActOut * 100) / 100,
+    totalForecastInflow: Math.round(sumFIn * 100) / 100,
+    totalForecastOutflow: Math.round(sumFOut * 100) / 100,
+    closingCash: runningCash,
+    peakWorkingCapitalDeficit: minCash < 0 ? Math.abs(minCash) : 0,
+    lowestPeriod,
+    fundingRequiredDate,
+  };
+
+  return { items, buckets, summary };
+}
+
+

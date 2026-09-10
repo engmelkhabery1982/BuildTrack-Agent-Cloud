@@ -1,0 +1,85 @@
+{
+  "feature": "W05",
+  "result": "PASSED_ARENA_14_SCENARIOS_PENDING_LOCAL_CARGO",
+  "start_head": "5c742b6",
+  "generated_utc": "2026-09-10T01:45:00.000Z",
+  "changes": [
+    "M\tdocs/agent-results/AGENT_QUEUE_CURSOR.md",
+    "A\tdocs/agent-results/W05_EVIDENCE.json",
+    "A\tdocs/agent-results/W05_RESULT.md",
+    "A\tsrc-tauri/src/cash_forecast_workflow.rs",
+    "M\tsrc-tauri/src/lib.rs",
+    "M\tsrc/components/CashFlowForecastBoard.tsx",
+    "M\tsrc/components/Dashboard.tsx",
+    "M\tsrc/App.tsx",
+    "M\tsrc/data/commercialWorkflow.ts",
+    "M\tsrc/utils/cashFlowForecast.ts",
+    "A\ttests/cash-forecast-governance.test.mjs",
+    "M\ttests/tauri-command-registration.test.mjs"
+  ],
+  "file_hashes": [
+    {
+      "path": "src-tauri/src/cash_forecast_workflow.rs",
+      "sha256": "9C2552C1EE0CB9FCE4426F8924AED362E1E74599C6F7D3F2B3148A5B72A5A927"
+    },
+    {
+      "path": "src-tauri/src/lib.rs",
+      "sha256": "3D0EE66B3E80DCB5D652A1972CC6C167D1D6CA26787920291EB3CBC4BB2077B4"
+    },
+    {
+      "path": "src/components/CashFlowForecastBoard.tsx",
+      "sha256": "EF650A90F2A108B6D0C473E29489A0946FCD327C43FB7A9CCECD0DCFC49816B6"
+    },
+    {
+      "path": "src/components/Dashboard.tsx",
+      "sha256": "C8EADB7C42FC731AF025876DD5CEA0BA0CB95C4E764EFD0EF2B2D48B82E98E77"
+    },
+    {
+      "path": "src/App.tsx",
+      "sha256": "0720D1CB3BB52DF3A0569043B237F05309A3D56A2AF1B4ECBA765AAB86720EDD"
+    },
+    {
+      "path": "src/data/commercialWorkflow.ts",
+      "sha256": "D8DC0FEE917E87F96BFBF174F767391FBFC2D295DD26095D12ACE3EB30688716"
+    },
+    {
+      "path": "src/utils/cashFlowForecast.ts",
+      "sha256": "25E80E073908DC3A0999D021F6565174F379B953F53FFF18BE8916FBE1B45C15"
+    },
+    {
+      "path": "tests/cash-forecast-governance.test.mjs",
+      "sha256": "240DDB887ECC7FA920CDC85E3CC53567A5AE067B9E61A38DFFEBFE3BF19BB624"
+    },
+    {
+      "path": "tests/tauri-command-registration.test.mjs",
+      "sha256": "20B346747A4CB25EC9F7B6332E8371E99456E1A59286A599FE5CFC100D0AF374"
+    }
+  ],
+  "commands": [
+    {
+      "name": "node --experimental-strip-types --test tests/cash-forecast-governance.test.mjs",
+      "exit_code": 0,
+      "output": "14 tests passed, 0 failed"
+    },
+    {
+      "name": "node --experimental-strip-types --test tests/tauri-command-registration.test.mjs",
+      "exit_code": 0,
+      "output": "2 tests passed, 0 failed"
+    },
+    {
+      "name": "npm test",
+      "exit_code": 0,
+      "output": "274 tests passed, 0 failed"
+    },
+    {
+      "name": "npm run lint",
+      "exit_code": 0,
+      "output": "tsc completed with 0 errors"
+    },
+    {
+      "name": "npm run build",
+      "exit_code": 0,
+      "output": "vite build succeeded"
+    }
+  ]
+}
