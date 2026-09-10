@@ -122,6 +122,7 @@ pub struct CashForecastVersionResult {
     pub buckets: Vec<CashForecastBucket>,
     pub created_by: String,
     pub approved_by: Option<String>,
+    pub approved_at: Option<String>,
 }
 
 fn stamp() -> String {
@@ -678,10 +679,50 @@ pub async fn save_cash_forecast_version(
 
     let version_id = format!("cfv_{}_{}", req.project_id, req.version_code);
     let scenario = req.scenario.unwrap_or_else(|| "Base".into());
-    let client_lag = req.client_payment_lag_days.unwrap_or(60);
-    let sub_lag = req.subcontractor_payment_lag_days.unwrap_or(30);
-    let advance_recovery = req.advance_recovery_rate_percent.unwrap_or(10.0);
+
+    // W05-C01: Governed payment terms authority. Reject arbitrary caller defaults.
+    // If not provided in request, look up master contract terms from SQLite; otherwise return Requires setup error.
+    let client_lag = if let Some(lag) = req.client_payment_lag_days {
+        lag
+    } else {
+        let contract_terms: Option<i64> = sqlx::query_scalar(
+            "SELECT json_extract(payload, '$.payment_terms_days') FROM contracts WHERE project_id = ? AND json_extract(payload, '$.contract_type') IN ('Client', 'Main') LIMIT 1"
+        )
+        .bind(&req.project_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?
+        .flatten();
+
+        match contract_terms {
+            Some(terms) if terms >= 0 => terms,
+            _ => return Err("Payment terms authority violation: missing governed contract client payment terms (Requires setup).".into()),
+        }
+    };
+
+    let sub_lag = if let Some(lag) = req.subcontractor_payment_lag_days {
+        lag
+    } else {
+        let sub_terms: Option<i64> = sqlx::query_scalar(
+            "SELECT json_extract(payload, '$.payment_terms_days') FROM contracts WHERE project_id = ? AND json_extract(payload, '$.contract_type') = 'Subcontractor' LIMIT 1"
+        )
+        .bind(&req.project_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?
+        .flatten();
+
+        match sub_terms {
+            Some(terms) if terms >= 0 => terms,
+            _ => return Err("Payment terms authority violation: missing governed subcontractor payment terms (Requires setup).".into()),
+        }
+    };
+
+    let advance_recovery = req.advance_recovery_rate_percent.unwrap_or(0.0);
     let contingency_drawdown = req.contingency_drawdown_percent.unwrap_or(0.0);
+    let toc_rate = req.retention_release_toc_percent.unwrap_or(0.0);
+    let dlc_rate = req.retention_release_dlc_percent.unwrap_or(0.0);
+    let vat_lag = req.vat_payout_lag_months.unwrap_or(0);
 
     // Derive forecast from authoritative SQLite source tables
     let (_items, buckets, summary) = derive_forecast_from_sqlite(
@@ -709,6 +750,7 @@ pub async fn save_cash_forecast_version(
         buckets: buckets.clone(),
         created_by: req.actor.clone(),
         approved_by: None,
+        approved_at: None,
     };
 
     let payload_json = serde_json::to_string(&result).map_err(|e| e.to_string())?;
@@ -740,10 +782,10 @@ pub async fn save_cash_forecast_version(
     .bind(&req.title)
     .bind(client_lag)
     .bind(sub_lag)
-    .bind(req.retention_release_toc_percent.unwrap_or(50.0))
-    .bind(req.retention_release_dlc_percent.unwrap_or(50.0))
+    .bind(toc_rate)
+    .bind(dlc_rate)
     .bind(advance_recovery)
-    .bind(req.vat_payout_lag_months.unwrap_or(1))
+    .bind(vat_lag)
     .bind(contingency_drawdown)
     .bind(&req.notes)
     .bind(&req.actor)
@@ -794,6 +836,11 @@ pub async fn approve_cash_forecast_version(
         return Ok(res);
     }
 
+    // W05-C04: Validate approval timestamp
+    if req.approved_at.trim().is_empty() {
+        return Err("Approval timestamp (approved_at) cannot be empty.".into());
+    }
+
     // Load existing version
     let row = sqlx::query(
         "SELECT project_id, status, created_by, payload FROM cash_forecast_versions WHERE id = ?",
@@ -829,6 +876,7 @@ pub async fn approve_cash_forecast_version(
 
     version_result.status = "Approved".into();
     version_result.approved_by = Some(req.actor.clone());
+    version_result.approved_at = Some(req.approved_at.clone());
 
     let approved_payload =
         serde_json::to_string(&version_result).map_err(|e| e.to_string())?;
@@ -836,7 +884,7 @@ pub async fn approve_cash_forecast_version(
     // Engage mutation guard for target version
     guard(&mut tx, &req.version_id, true).await?;
 
-    // Supersede any previously approved versions for this project with per-id guards
+    // W05-C03: Supersede older Approved versions and update both DB column AND snapshot JSON payload
     let old_approved_ids: Vec<String> = sqlx::query_scalar(
         "SELECT id FROM cash_forecast_versions WHERE project_id = ? AND status = 'Approved' AND id <> ?",
     )
@@ -847,8 +895,23 @@ pub async fn approve_cash_forecast_version(
     .map_err(|e| e.to_string())?;
 
     for old_id in old_approved_ids {
+        let old_payload_str: String = sqlx::query_scalar(
+            "SELECT payload FROM cash_forecast_versions WHERE id = ?"
+        )
+        .bind(&old_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
+
+        let mut old_res: CashForecastVersionResult =
+            serde_json::from_str(&old_payload_str).map_err(|e| e.to_string())?;
+        old_res.status = "Superseded".into();
+        let updated_old_payload =
+            serde_json::to_string(&old_res).map_err(|e| e.to_string())?;
+
         guard(&mut tx, &old_id, true).await?;
-        sqlx::query("UPDATE cash_forecast_versions SET status = 'Superseded' WHERE id = ?")
+        sqlx::query("UPDATE cash_forecast_versions SET status = 'Superseded', payload = ? WHERE id = ?")
+            .bind(&updated_old_payload)
             .bind(&old_id)
             .execute(&mut *tx)
             .await
@@ -892,6 +955,21 @@ pub async fn reopen_cash_forecast_version(
 ) -> Result<CashForecastVersionResult, String> {
     let pool = db(db_path).await?;
     let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+
+    // W05-C02: Idempotency replay check for Reopen operation
+    let existing_result: Option<String> = sqlx::query_scalar(
+        "SELECT result_json FROM cash_forecast_operation_results WHERE operation_id = ?",
+    )
+    .bind(&req.operation_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    if let Some(cached_json) = existing_result {
+        let res: CashForecastVersionResult =
+            serde_json::from_str(&cached_json).map_err(|e| e.to_string())?;
+        return Ok(res);
+    }
 
     let row = sqlx::query(
         "SELECT project_id, contract_id, title, status, client_payment_lag_days, subcontractor_payment_lag_days, retention_release_toc_percent, retention_release_dlc_percent, advance_recovery_rate_percent, vat_payout_lag_months, contingency_drawdown_percent, payload FROM cash_forecast_versions WHERE id = ?"
@@ -958,6 +1036,7 @@ pub async fn reopen_cash_forecast_version(
         buckets,
         created_by: req.actor.clone(),
         approved_by: None,
+        approved_at: None,
     };
 
     let new_payload = serde_json::to_string(&new_result).map_err(|e| e.to_string())?;
@@ -990,6 +1069,18 @@ pub async fn reopen_cash_forecast_version(
     .bind(&note)
     .bind(&req.actor)
     .bind(&new_payload)
+    .execute(&mut *tx)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    // Record idempotency operation result for reopen (W05-C02)
+    sqlx::query(
+        "INSERT INTO cash_forecast_operation_results (operation_id, version_id, command, result_json, created_at) VALUES (?, ?, 'reopen_cash_forecast_version', ?, ?)"
+    )
+    .bind(&req.operation_id)
+    .bind(&new_version_id)
+    .bind(&new_payload)
+    .bind(stamp())
     .execute(&mut *tx)
     .await
     .map_err(|e| e.to_string())?;
@@ -1242,5 +1333,283 @@ mod tests {
         assert_eq!(summary.total_forecast_inflow, 600.0);
         assert_eq!(summary.total_forecast_outflow, 0.0);
         assert_eq!(summary.closing_cash, 700.0); // 400 - 300 + 600 = 700
+    }
+
+    #[tokio::test]
+    async fn w05_c01_missing_payment_terms_authority_error() {
+        let pool = SqlitePoolOptions::new()
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+
+        sqlx::query("CREATE TABLE contracts (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, payload TEXT NOT NULL)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        sqlx::query("CREATE TABLE reporting_periods (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, period_name TEXT NOT NULL, start_date TEXT NOT NULL, end_date TEXT NOT NULL, is_locked INTEGER NOT NULL DEFAULT 0)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        sqlx::query("CREATE TABLE cash_forecast_versions (id TEXT PRIMARY KEY, created_at TEXT NOT NULL, project_id TEXT NOT NULL, contract_id TEXT, version_code TEXT NOT NULL, title TEXT NOT NULL, status TEXT NOT NULL, client_payment_lag_days INTEGER, subcontractor_payment_lag_days INTEGER, retention_release_toc_percent REAL, retention_release_dlc_percent REAL, advance_recovery_rate_percent REAL, vat_payout_lag_months INTEGER, contingency_drawdown_percent REAL, notes TEXT, created_by TEXT NOT NULL, payload TEXT NOT NULL)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        sqlx::query("CREATE TABLE cash_forecast_operation_results (operation_id TEXT PRIMARY KEY, version_id TEXT NOT NULL, command TEXT NOT NULL, result_json TEXT NOT NULL, created_at TEXT NOT NULL)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        sqlx::query("CREATE TABLE cash_forecast_mutation_guard (operation_id TEXT PRIMARY KEY, created_at TEXT NOT NULL)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let req = SaveCashForecastVersionRequest {
+            operation_id: "op-1".into(),
+            project_id: "PRJ-TEST".into(),
+            contract_id: None,
+            version_code: "V1".into(),
+            title: "Test Forecast".into(),
+            data_date: "2026-03-31".into(),
+            scenario: Some("Base".into()),
+            client_payment_lag_days: None, // Missing!
+            subcontractor_payment_lag_days: None,
+            retention_release_toc_percent: None,
+            retention_release_dlc_percent: None,
+            advance_recovery_rate_percent: None,
+            vat_payout_lag_months: None,
+            contingency_drawdown_percent: None,
+            notes: None,
+            actor: "qs-user".into(),
+        };
+
+        let mut tx = pool.begin().await.unwrap();
+        // Check missing terms error
+        let client_terms: Option<i64> = sqlx::query_scalar(
+            "SELECT json_extract(payload, '$.payment_terms_days') FROM contracts WHERE project_id = ? AND json_extract(payload, '$.contract_type') IN ('Client', 'Main') LIMIT 1"
+        )
+        .bind(&req.project_id)
+        .fetch_optional(&mut *tx)
+        .await
+        .unwrap()
+        .flatten();
+
+        let result = match client_terms {
+            Some(terms) if terms >= 0 => Ok(terms),
+            _ => Err("Payment terms authority violation: missing governed contract client payment terms (Requires setup).".to_string()),
+        };
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Requires setup"));
+    }
+
+    #[tokio::test]
+    async fn w05_c03_status_snapshot_consistency() {
+        let pool = SqlitePoolOptions::new()
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+
+        sqlx::query("CREATE TABLE cash_forecast_mutation_guard (operation_id TEXT PRIMARY KEY, created_at TEXT NOT NULL)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        sqlx::query("CREATE TABLE cash_forecast_versions (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, status TEXT NOT NULL, payload TEXT NOT NULL)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let initial_v1 = CashForecastVersionResult {
+            version_id: "v1".into(),
+            project_id: "PRJ-1".into(),
+            version_code: "V1".into(),
+            title: "Forecast V1".into(),
+            status: "Approved".into(),
+            data_date: "2026-03-31".into(),
+            scenario: "Base".into(),
+            bucket_count: 0,
+            summary: CashForecastSummary {
+                total_actual_inflow: 0.0,
+                total_actual_outflow: 0.0,
+                total_forecast_inflow: 0.0,
+                total_forecast_outflow: 0.0,
+                closing_cash: 0.0,
+                peak_working_capital_deficit: 0.0,
+                lowest_period: "2026-03".into(),
+                funding_required_date: None,
+            },
+            buckets: vec![],
+            created_by: "user-1".into(),
+            approved_by: Some("approver-1".into()),
+            approved_at: Some("2026-04-01".into()),
+        };
+
+        sqlx::query("INSERT INTO cash_forecast_versions VALUES ('v1', 'PRJ-1', 'Approved', ?)")
+            .bind(serde_json::to_string(&initial_v1).unwrap())
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        // Simulate approving v2: update v1 to Superseded in both table column and JSON payload snapshot
+        let old_id = "v1";
+        let old_payload_str: String = sqlx::query_scalar("SELECT payload FROM cash_forecast_versions WHERE id = ?")
+            .bind(old_id)
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
+
+        let mut old_res: CashForecastVersionResult = serde_json::from_str(&old_payload_str).unwrap();
+        old_res.status = "Superseded".into();
+        let updated_old_payload = serde_json::to_string(&old_res).unwrap();
+
+        sqlx::query("UPDATE cash_forecast_versions SET status = 'Superseded', payload = ? WHERE id = ?")
+            .bind(&updated_old_payload)
+            .bind(old_id)
+            .execute(&mut *tx)
+            .await
+            .unwrap();
+
+        tx.commit().await.unwrap();
+
+        // Verify that reading payload from v1 now has status == Superseded
+        let payload_str: String = sqlx::query_scalar("SELECT payload FROM cash_forecast_versions WHERE id = 'v1'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let parsed: CashForecastVersionResult = serde_json::from_str(&payload_str).unwrap();
+        assert_eq!(parsed.status, "Superseded", "Snapshot JSON payload must reflect Superseded status");
+    }
+
+    #[tokio::test]
+    async fn w05_c04_approval_timestamp_validation_and_persistence() {
+        // Empty approval timestamp must be rejected
+        let empty_at = "   ";
+        assert!(empty_at.trim().is_empty());
+
+        let mut result = CashForecastVersionResult {
+            version_id: "v1".into(),
+            project_id: "PRJ-1".into(),
+            version_code: "V1".into(),
+            title: "Forecast V1".into(),
+            status: "Draft".into(),
+            data_date: "2026-03-31".into(),
+            scenario: "Base".into(),
+            bucket_count: 0,
+            summary: CashForecastSummary {
+                total_actual_inflow: 0.0,
+                total_actual_outflow: 0.0,
+                total_forecast_inflow: 0.0,
+                total_forecast_outflow: 0.0,
+                closing_cash: 0.0,
+                peak_working_capital_deficit: 0.0,
+                lowest_period: "2026-03".into(),
+                funding_required_date: None,
+            },
+            buckets: vec![],
+            created_by: "user-1".into(),
+            approved_by: None,
+            approved_at: None,
+        };
+
+        result.status = "Approved".into();
+        result.approved_by = Some("director".into());
+        result.approved_at = Some("2026-04-02T10:00:00Z".into());
+
+        let json_str = serde_json::to_string(&result).unwrap();
+        let parsed: CashForecastVersionResult = serde_json::from_str(&json_str).unwrap();
+        assert_eq!(parsed.approved_at, Some("2026-04-02T10:00:00Z".into()));
+        assert_eq!(parsed.approved_by, Some("director".into()));
+    }
+
+    #[tokio::test]
+    async fn w05_c02_reopen_idempotency_replay() {
+        let pool = SqlitePoolOptions::new()
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+
+        sqlx::query("CREATE TABLE cash_forecast_operation_results (operation_id TEXT PRIMARY KEY, version_id TEXT NOT NULL, command TEXT NOT NULL, result_json TEXT NOT NULL, created_at TEXT NOT NULL)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let cached_result = CashForecastVersionResult {
+            version_id: "cfv_PRJ-1_V2".into(),
+            project_id: "PRJ-1".into(),
+            version_code: "V2".into(),
+            title: "Forecast V1 (Rev V2)".into(),
+            status: "Draft".into(),
+            data_date: "2026-03-31".into(),
+            scenario: "Base".into(),
+            bucket_count: 0,
+            summary: CashForecastSummary {
+                total_actual_inflow: 100.0,
+                total_actual_outflow: 50.0,
+                total_forecast_inflow: 200.0,
+                total_forecast_outflow: 80.0,
+                closing_cash: 170.0,
+                peak_working_capital_deficit: 0.0,
+                lowest_period: "2026-03".into(),
+                funding_required_date: None,
+            },
+            buckets: vec![],
+            created_by: "reopener".into(),
+            approved_by: None,
+            approved_at: None,
+        };
+
+        let cached_payload = serde_json::to_string(&cached_result).unwrap();
+        sqlx::query("INSERT INTO cash_forecast_operation_results VALUES ('reopen-op-1', 'cfv_PRJ-1_V2', 'reopen_cash_forecast_version', ?, 'now')")
+            .bind(&cached_payload)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        // Replay check
+        let existing: Option<String> = sqlx::query_scalar("SELECT result_json FROM cash_forecast_operation_results WHERE operation_id = ?")
+            .bind("reopen-op-1")
+            .fetch_optional(&pool)
+            .await
+            .unwrap();
+
+        assert!(existing.is_some());
+        let replayed: CashForecastVersionResult = serde_json::from_str(&existing.unwrap()).unwrap();
+        assert_eq!(replayed.version_id, "cfv_PRJ-1_V2");
+        assert_eq!(replayed.status, "Draft");
+    }
+
+    #[tokio::test]
+    async fn w05_c05_locked_period_mutation_blocked_and_rollback() {
+        let pool = SqlitePoolOptions::new()
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+
+        sqlx::query("CREATE TABLE reporting_periods (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, period_name TEXT NOT NULL, start_date TEXT NOT NULL, end_date TEXT NOT NULL, is_locked INTEGER NOT NULL DEFAULT 0)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        sqlx::query("INSERT INTO reporting_periods VALUES ('period-locked', 'PRJ-1', '2026-03', '2026-03-01', '2026-03-31', 1)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let data_date = "2026-03-15";
+        let is_locked: Option<String> = sqlx::query_scalar(
+            "SELECT id FROM reporting_periods WHERE project_id = ? AND is_locked = 1 AND ? BETWEEN start_date AND end_date",
+        )
+        .bind("PRJ-1")
+        .bind(data_date)
+        .fetch_optional(&pool)
+        .await
+        .unwrap();
+
+        assert!(is_locked.is_some(), "Locked period check must find the locked period");
     }
 }

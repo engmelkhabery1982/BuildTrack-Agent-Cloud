@@ -59,7 +59,7 @@
     {
       "name": "node --experimental-strip-types --test tests/cash-forecast-governance.test.mjs",
       "exit_code": 0,
-      "output": "14 tests passed, 0 failed"
+      "output": "19 tests passed, 0 failed"
     },
     {
       "name": "node --experimental-strip-types --test tests/tauri-command-registration.test.mjs",
@@ -69,7 +69,7 @@
     {
       "name": "npm test",
       "exit_code": 0,
-      "output": "274 tests passed, 0 failed"
+      "output": "279 tests passed, 0 failed"
     },
     {
       "name": "npm run lint",

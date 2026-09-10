@@ -62,6 +62,7 @@ export interface CashForecastVersionDto {
   }>;
   createdBy: string;
   approvedBy?: string | null;
+  approvedAt?: string | null;
 }
 
 export interface SaveCashForecastVersionRequest extends Record<string, unknown> {

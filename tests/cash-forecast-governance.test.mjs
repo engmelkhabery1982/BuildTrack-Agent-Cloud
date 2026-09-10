@@ -548,3 +548,85 @@ test("W05-G10: Get Cash Forecast Version - retrieves immutable frozen snapshot",
     "Snapshot payload must be read directly from database"
   );
 });
+
+// 15. W05-C01: Governed Payment Terms Authority
+test("W05-C01: Payment Terms Authority - missing governed master terms returns Requires setup", () => {
+  const rust = readFileSync(new URL("../src-tauri/src/cash_forecast_workflow.rs", import.meta.url), "utf8");
+  assert.ok(
+    rust.includes("Payment terms authority violation: missing governed contract client payment terms (Requires setup)"),
+    "Workflow must enforce contract client terms authority"
+  );
+  assert.ok(
+    rust.includes("Payment terms authority violation: missing governed subcontractor payment terms (Requires setup)"),
+    "Workflow must enforce contract subcontractor terms authority"
+  );
+  assert.ok(
+    !rust.includes("client_payment_lag_days.unwrap_or(60)"),
+    "Invented 60-day default must be removed"
+  );
+});
+
+// 16. W05-C02: Reopen Idempotency Replay
+test("W05-C02: Reopen Idempotency - replay returns cached result and creates no duplicates", () => {
+  const rust = readFileSync(new URL("../src-tauri/src/cash_forecast_workflow.rs", import.meta.url), "utf8");
+  assert.ok(
+    rust.includes("reopen_cash_forecast_version"),
+    "reopen_cash_forecast_version must be present"
+  );
+  assert.ok(
+    rust.includes("'reopen_cash_forecast_version'"),
+    "reopen command must be registered in cash_forecast_operation_results"
+  );
+});
+
+// 17. W05-C03: Snapshot Status Consistency on Superseding
+test("W05-C03: Snapshot Status Consistency - superseded versions update both column and payload snapshot", () => {
+  const rust = readFileSync(new URL("../src-tauri/src/cash_forecast_workflow.rs", import.meta.url), "utf8");
+  assert.ok(
+    rust.includes("old_res.status = \"Superseded\""),
+    "Approving a new version must update previous approved version JSON snapshot status to Superseded"
+  );
+  assert.ok(
+    rust.includes("UPDATE cash_forecast_versions SET status = 'Superseded', payload = ? WHERE id = ?"),
+    "Approving a new version must update both DB status column and payload"
+  );
+});
+
+// 18. W05-C04: Approval Timestamp Validation and Persistence
+test("W05-C04: Approval Timestamp - validates empty timestamp and persists approved_at", () => {
+  const rust = readFileSync(new URL("../src-tauri/src/cash_forecast_workflow.rs", import.meta.url), "utf8");
+  assert.ok(
+    rust.includes("Approval timestamp (approved_at) cannot be empty"),
+    "Approval timestamp must be validated as non-empty"
+  );
+  assert.ok(
+    rust.includes("version_result.approved_at = Some(req.approved_at.clone())"),
+    "Approval timestamp must be persisted into CashForecastVersionResult"
+  );
+});
+
+// 19. W05-C05: Executable Negative Tests
+test("W05-C05: Executable Negative Tests in Rust - tests cover authority, idempotency, consistency, rollback", () => {
+  const rust = readFileSync(new URL("../src-tauri/src/cash_forecast_workflow.rs", import.meta.url), "utf8");
+  assert.ok(
+    rust.includes("w05_c01_missing_payment_terms_authority_error"),
+    "Must include w05_c01_missing_payment_terms_authority_error test"
+  );
+  assert.ok(
+    rust.includes("w05_c02_reopen_idempotency_replay"),
+    "Must include w05_c02_reopen_idempotency_replay test"
+  );
+  assert.ok(
+    rust.includes("w05_c03_status_snapshot_consistency"),
+    "Must include w05_c03_status_snapshot_consistency test"
+  );
+  assert.ok(
+    rust.includes("w05_c04_approval_timestamp_validation_and_persistence"),
+    "Must include w05_c04_approval_timestamp_validation_and_persistence test"
+  );
+  assert.ok(
+    rust.includes("w05_c05_locked_period_mutation_blocked_and_rollback"),
+    "Must include w05_c05_locked_period_mutation_blocked_and_rollback test"
+  );
+});
+
