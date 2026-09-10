@@ -29,8 +29,11 @@ QUEUE_CURSOR=docs/agent-results/AGENT_QUEUE_CURSOR.md
 CURRENT_TITLE=Versioned Cash Forecast Mandatory Correction
 CURRENT_STATUS=CORRECTION_REQUIRED_BEFORE_W06
 CODEX_REVIEW_STATUS=W04_ACCEPTED_W05_CORRECTION_REQUIRED
-FEATURE_BATCH_LIMIT=87
-STOP_AFTER_CURRENT_FEATURE=false
+FEATURE_BATCH_LIMIT=1
+STOP_AFTER_CURRENT_FEATURE=true
+ALL_CANDIDATE_FEATURES_OPEN=W04-W90
+NEXT_FEATURE_REQUIRES_USER_COMMAND=true
+NEXT_FEATURE_REQUIRES_CODEX_ACCEPTANCE=false
 PARALLEL_CANDIDATE_FEATURES=DISABLED
 PARALLEL_CANDIDATE_MODE=SINGLE_SESSION_SEQUENTIAL
 PARALLEL_INTEGRATION_GATE=EACH_FEATURE_MUST_PASS_ITS_DELIVERY_GATE
@@ -60,12 +63,13 @@ KNOWN_FAILED_DELIVERY=arena/01a084ca-buildtrack-agent-cloud@89cffb0:DO_NOT_MERGE
 - ابدأ فقط بعد نجاح `node tools/agent-preflight.mjs`.
 - ابدأ من أحدث `agent-cloud/main` ومن `AGENT_QUEUE_CURSOR.next_feature`. W04 معتمدة؛ حافظ
   على تطبيق W05 المفضل في `main` وأغلق جميع `W05-C01..C09` الموثقة في تقرير Codex.
-- لا تبدأ W06 قبل نجاح جميع تصحيحات W05 وبواباتها. بعد نجاح التسليم انتقل تلقائيًا إلى W06.
+- لا تبدأ W06 قبل نجاح جميع تصحيحات W05 وبواباتها. بعد نجاح التسليم توقف؛ عندما يرسل
+  المستخدم «ابدأ الميزة التالية» ابدأ W06 دون انتظار قبول Codex أو تحديث هذا الملف.
 - الفرع الموجود في `KNOWN_FAILED_DELIVERY` مرجع فشل فقط؛ لا تدمجه ولا تستعد ملفات W05 منه.
 - لا تعدل قائمة `CONDITIONAL_MODIFY` إلا عند إثبات dependency مباشر وتسجيل السبب.
 - لا commit ولا Push قبل نجاح `node tools/agent-delivery-gate.mjs` للميزة الحالية.
 - لا تكتب `PASS` أو `CLOSED` أو تقييمًا ذاتيًا. النتيجة الوحيدة المسموحة:
   `READY FOR CODEX REVIEW` أو `WIP/BLOCKED`.
-- التنفيذ متتابع داخل الجلسة: ميزة واحدة واختباراتها وتسليمها، ثم الميزة التالية بلا انتظار
-  موافقة Codex، مع بقاء قرار `CLOSED — 8/10` من سلطة Codex وحده.
+- التنفيذ متتابع بأمر المستخدم: ميزة واحدة واختباراتها وتسليمها ثم توقف. أمر المستخدم التالي
+  يفتح الميزة الرقمية التالية دون انتظار موافقة Codex؛ قرار `CLOSED — 8/10` يبقى لـCodex.
 

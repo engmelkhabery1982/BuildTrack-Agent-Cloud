@@ -44,8 +44,11 @@ test('active and master work orders point to the current gate and detailed autho
   assert.match(active, /DELIVERY_BRANCH=CURRENT_BOUND_BRANCH/);
   assert.match(active, /EXECUTION_MODE=OPEN_SEQUENTIAL_CANDIDATE_QUEUE/);
   assert.match(active, /OPEN_FEATURE_RANGE=W04-W90/);
-  assert.match(active, /FEATURE_BATCH_LIMIT=87/);
-  assert.match(active, /STOP_AFTER_CURRENT_FEATURE=false/);
+  assert.match(active, /FEATURE_BATCH_LIMIT=1/);
+  assert.match(active, /STOP_AFTER_CURRENT_FEATURE=true/);
+  assert.match(active, /ALL_CANDIDATE_FEATURES_OPEN=W04-W90/);
+  assert.match(active, /NEXT_FEATURE_REQUIRES_USER_COMMAND=true/);
+  assert.match(active, /NEXT_FEATURE_REQUIRES_CODEX_ACCEPTANCE=false/);
   assert.match(active, /AGENT_MUST_NOT_EDIT=true/);
   assert.match(active, /DELETE_ALLOWLIST=\[\]/);
   assert.match(active, /NEXT_WEEK_90_FEATURES_EXECUTION_PLAN_AR\.md/);
