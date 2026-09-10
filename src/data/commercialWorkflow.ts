@@ -111,3 +111,6 @@ export const reopenCashForecastVersion = (request: ReopenCashForecastVersionRequ
 export const getCashForecastVersion = (versionId: string) =>
   invokeCommercial<CashForecastVersionDto>('get_cash_forecast_version', { versionId });
 
+export const listCashForecastVersions = (projectId: string) =>
+  invokeCommercial<CashForecastVersionDto[]>('list_cash_forecast_versions', { projectId });
+

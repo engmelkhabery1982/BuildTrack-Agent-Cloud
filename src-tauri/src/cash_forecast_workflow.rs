@@ -833,18 +833,28 @@ pub async fn approve_cash_forecast_version(
     let approved_payload =
         serde_json::to_string(&version_result).map_err(|e| e.to_string())?;
 
-    // Engage mutation guard
+    // Engage mutation guard for target version
     guard(&mut tx, &req.version_id, true).await?;
 
-    // Supersede any previously approved versions for this project
-    sqlx::query(
-        "UPDATE cash_forecast_versions SET status = 'Superseded' WHERE project_id = ? AND status = 'Approved' AND id <> ?",
+    // Supersede any previously approved versions for this project with per-id guards
+    let old_approved_ids: Vec<String> = sqlx::query_scalar(
+        "SELECT id FROM cash_forecast_versions WHERE project_id = ? AND status = 'Approved' AND id <> ?",
     )
     .bind(&project_id)
     .bind(&req.version_id)
-    .execute(&mut *tx)
+    .fetch_all(&mut *tx)
     .await
     .map_err(|e| e.to_string())?;
+
+    for old_id in old_approved_ids {
+        guard(&mut tx, &old_id, true).await?;
+        sqlx::query("UPDATE cash_forecast_versions SET status = 'Superseded' WHERE id = ?")
+            .bind(&old_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+        guard(&mut tx, &old_id, false).await?;
+    }
 
     // Update target version to Approved
     sqlx::query(
@@ -1012,13 +1022,43 @@ pub async fn get_cash_forecast_version(
     Ok(result)
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListCashForecastVersionsRequest {
+    pub project_id: String,
+}
+
+/// List all saved versions for a project in reverse chronological order
+pub async fn list_cash_forecast_versions(
+    db_path: &Path,
+    req: ListCashForecastVersionsRequest,
+) -> Result<Vec<CashForecastVersionResult>, String> {
+    let pool = db(db_path).await?;
+    let rows = sqlx::query(
+        "SELECT payload FROM cash_forecast_versions WHERE project_id = ? ORDER BY created_at DESC",
+    )
+    .bind(&req.project_id)
+    .fetch_all(&pool)
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let mut list = Vec::new();
+    for row in rows {
+        let payload_str: String = row.get("payload");
+        if let Ok(res) = serde_json::from_str::<CashForecastVersionResult>(&payload_str) {
+            list.push(res);
+        }
+    }
+    Ok(list)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use sqlx::sqlite::SqlitePoolOptions;
 
     #[tokio::test]
-    async fn w05_sqlite_mutation_guard_protects_approved_versions() {
+    async fn w05_sqlite_tight_mutation_guard_protects_approved_versions() {
         let pool = SqlitePoolOptions::new()
             .connect("sqlite::memory:")
             .await
@@ -1043,7 +1083,7 @@ mod tests {
             CREATE TRIGGER cash_forecast_versions_governed_update_guard
             BEFORE UPDATE ON cash_forecast_versions
             WHEN OLD.status IN ('Approved', 'Archived', 'Superseded')
-              AND NOT EXISTS (SELECT 1 FROM cash_forecast_mutation_guard WHERE operation_id LIKE 'internal:cash_forecast:%')
+              AND NOT EXISTS (SELECT 1 FROM cash_forecast_mutation_guard WHERE operation_id = ('internal:cash_forecast:' || OLD.id))
             BEGIN SELECT RAISE(ABORT, 'Governed cash forecast version status changes require a lifecycle transaction.'); END;
             "#,
         )
@@ -1056,7 +1096,7 @@ mod tests {
             CREATE TRIGGER cash_forecast_versions_governed_delete_guard
             BEFORE DELETE ON cash_forecast_versions
             WHEN OLD.status <> 'Draft'
-              AND NOT EXISTS (SELECT 1 FROM cash_forecast_mutation_guard WHERE operation_id LIKE 'internal:cash_forecast:%')
+              AND NOT EXISTS (SELECT 1 FROM cash_forecast_mutation_guard WHERE operation_id = ('internal:cash_forecast:' || OLD.id))
             BEGIN SELECT RAISE(ABORT, 'Only Draft cash forecast versions may be deleted.'); END;
             "#,
         )
@@ -1069,17 +1109,29 @@ mod tests {
             .await
             .unwrap();
 
+        // 1. Direct unshielded update on Approved version must fail
         let unshielded_update = sqlx::query("UPDATE cash_forecast_versions SET payload = '{\"hacked\":true}' WHERE id = 'v1'")
             .execute(&pool)
             .await;
         assert!(unshielded_update.is_err(), "Direct unshielded update on Approved version must fail");
 
+        // 2. Unshielded delete on Approved version must fail
         let unshielded_delete = sqlx::query("DELETE FROM cash_forecast_versions WHERE id = 'v1'")
             .execute(&pool)
             .await;
         assert!(unshielded_delete.is_err(), "Direct unshielded delete on Approved version must fail");
 
-        // Shielded with mutation guard
+        // 3. Shielded with WRONG version id must ALSO fail (per-id tightness)
+        sqlx::query("INSERT INTO cash_forecast_mutation_guard VALUES ('internal:cash_forecast:other_v99', 'now')")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let wrong_shield = sqlx::query("UPDATE cash_forecast_versions SET payload = '{\"hacked\":true}' WHERE id = 'v1'")
+            .execute(&pool)
+            .await;
+        assert!(wrong_shield.is_err(), "Update with mismatched guard ID must fail");
+
+        // 4. Shielded with EXACT matching mutation guard succeeds
         sqlx::query("INSERT INTO cash_forecast_mutation_guard VALUES ('internal:cash_forecast:v1', 'now')")
             .execute(&pool)
             .await
@@ -1088,7 +1140,17 @@ mod tests {
         let shielded_update = sqlx::query("UPDATE cash_forecast_versions SET payload = '{\"governed\":true}' WHERE id = 'v1'")
             .execute(&pool)
             .await;
-        assert!(shielded_update.is_ok(), "Shielded update must succeed");
+        assert!(shielded_update.is_ok(), "Shielded update with exact version ID must succeed");
+
+        // 5. Cleanup removes guard; subsequent updates must fail again
+        sqlx::query("DELETE FROM cash_forecast_mutation_guard WHERE operation_id = 'internal:cash_forecast:v1'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let post_cleanup = sqlx::query("UPDATE cash_forecast_versions SET payload = '{\"hacked\":true}' WHERE id = 'v1'")
+            .execute(&pool)
+            .await;
+        assert!(post_cleanup.is_err(), "Update after cleanup must fail");
     }
 
     #[tokio::test]
@@ -1096,5 +1158,89 @@ mod tests {
         assert_eq!(money(100.456), 100.46);
         assert_eq!(money(100.454), 100.45);
         assert_eq!(money(0.0), 0.0);
+    }
+
+    #[tokio::test]
+    async fn w05_sqlite_derivation_actual_forecast_split() {
+        let pool = SqlitePoolOptions::new()
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+
+        // Initialize required tables
+        sqlx::query(
+            r#"
+            CREATE TABLE payment_certificates (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, payload TEXT NOT NULL);
+            CREATE TABLE certificate_partial_payments (
+                payment_id TEXT PRIMARY KEY,
+                certificate_id TEXT NOT NULL,
+                payment_date TEXT NOT NULL,
+                amount REAL NOT NULL,
+                reference TEXT
+            );
+            CREATE TABLE supplier_invoices (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, payload TEXT NOT NULL);
+            CREATE TABLE procurement (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, payload TEXT NOT NULL);
+            CREATE TABLE cash_flow (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, payload TEXT NOT NULL);
+            CREATE TABLE reporting_periods (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL,
+                period_name TEXT NOT NULL,
+                start_date TEXT NOT NULL,
+                end_date TEXT NOT NULL,
+                is_locked INTEGER NOT NULL DEFAULT 0
+            );
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // 1. Insert Client certificate: Net 1,000, 400 paid on 2026-03-15 (Actual), 600 remaining (Forecast)
+        sqlx::query(
+            "INSERT INTO payment_certificates VALUES ('cert-1', 'PRJ-1', '{\"certificate_type\":\"Client\",\"net_certified_value\":1000.0,\"certificate_date\":\"2026-03-10\",\"status\":\"Partially Paid\"}')"
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query(
+            "INSERT INTO certificate_partial_payments VALUES ('pay-1', 'cert-1', '2026-03-15', 400.0, 'Wire 001')"
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // 2. Insert Supplier Invoice: 300 paid in full on 2026-03-20 (Actual Outflow), 0 remaining
+        sqlx::query(
+            "INSERT INTO supplier_invoices VALUES ('inv-1', 'PRJ-1', '{\"total_amount\":300.0,\"paid_amount\":300.0,\"invoice_date\":\"2026-03-01\",\"paid_date\":\"2026-03-20\",\"status\":\"Paid\"}')"
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        let (items, buckets, summary) = derive_forecast_from_sqlite(
+            &mut tx,
+            "PRJ-1",
+            "2026-03-31",
+            "Base",
+            60,
+            30,
+            0.0,
+            0.0,
+        )
+        .await
+        .unwrap();
+        tx.rollback().await.unwrap();
+
+        // Verify items
+        assert_eq!(items.len(), 3, "Expected 3 items: actual paid cert, cert balance forecast, actual paid invoice");
+        
+        // Check actuals and forecast totals
+        assert_eq!(summary.total_actual_inflow, 400.0);
+        assert_eq!(summary.total_actual_outflow, 300.0);
+        assert_eq!(summary.total_forecast_inflow, 600.0);
+        assert_eq!(summary.total_forecast_outflow, 0.0);
+        assert_eq!(summary.closing_cash, 700.0); // 400 - 300 + 600 = 700
     }
 }

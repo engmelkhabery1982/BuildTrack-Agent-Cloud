@@ -284,6 +284,15 @@ async fn get_cash_forecast_version(
 }
 
 #[tauri::command]
+async fn list_cash_forecast_versions(
+    app: tauri::AppHandle,
+    request: cash_forecast_workflow::ListCashForecastVersionsRequest,
+) -> Result<Vec<cash_forecast_workflow::CashForecastVersionResult>, String> {
+    let path = app.path().app_config_dir().map_err(|error| error.to_string())?.join("buildtrack.db");
+    cash_forecast_workflow::list_cash_forecast_versions(&path, request).await
+}
+
+#[tauri::command]
 async fn issue_report_version(
     app: tauri::AppHandle,
     request: report_versioning::IssueReportVersionRequest,
@@ -3729,13 +3738,13 @@ pub fn run() {
               CREATE TRIGGER IF NOT EXISTS cash_forecast_versions_governed_update_guard
               BEFORE UPDATE ON cash_forecast_versions
               WHEN OLD.status IN ('Approved', 'Archived', 'Superseded')
-                AND NOT EXISTS (SELECT 1 FROM cash_forecast_mutation_guard WHERE operation_id LIKE 'internal:cash_forecast:%')
+                AND NOT EXISTS (SELECT 1 FROM cash_forecast_mutation_guard WHERE operation_id = ('internal:cash_forecast:' || OLD.id))
               BEGIN SELECT RAISE(ABORT, 'Governed cash forecast version status changes require a lifecycle transaction.'); END;
 
               CREATE TRIGGER IF NOT EXISTS cash_forecast_versions_governed_delete_guard
               BEFORE DELETE ON cash_forecast_versions
               WHEN OLD.status <> 'Draft'
-                AND NOT EXISTS (SELECT 1 FROM cash_forecast_mutation_guard WHERE operation_id LIKE 'internal:cash_forecast:%')
+                AND NOT EXISTS (SELECT 1 FROM cash_forecast_mutation_guard WHERE operation_id = ('internal:cash_forecast:' || OLD.id))
               BEGIN SELECT RAISE(ABORT, 'Only Draft cash forecast versions may be deleted.'); END;
             "#,
             kind: tauri_plugin_sql::MigrationKind::Up,
@@ -3779,6 +3788,7 @@ pub fn run() {
             approve_cash_forecast_version,
             reopen_cash_forecast_version,
             get_cash_forecast_version,
+            list_cash_forecast_versions,
             issue_report_version,
             approve_report_template,
             approve_cost_plan_version,

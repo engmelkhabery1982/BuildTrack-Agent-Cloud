@@ -32,6 +32,7 @@ import {
   saveCashForecastVersion,
   approveCashForecastVersion,
   reopenCashForecastVersion,
+  listCashForecastVersions,
   CashForecastVersionDto,
 } from '@/data/commercialWorkflow';
 
@@ -76,10 +77,31 @@ export const CashFlowForecastBoard: React.FC<CashFlowForecastBoardProps> = ({
 
   // Version state
   const [activeVersion, setActiveVersion] = useState<CashForecastVersionDto | null>(null);
+  const [savedVersions, setSavedVersions] = useState<CashForecastVersionDto[]>([]);
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [reopenModalOpen, setReopenModalOpen] = useState(false);
   const [reopenReason, setReopenReason] = useState('');
+
+  const loadSavedVersions = async () => {
+    try {
+      if ('__TAURI_INTERNALS__' in window) {
+        const list = await listCashForecastVersions(projectId);
+        setSavedVersions(list || []);
+        if (list && list.length > 0 && !activeVersion) {
+          // Default to latest approved or latest created version
+          const approved = list.find((v) => v.status === 'Approved');
+          setActiveVersion(approved || list[0]);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load saved cash forecast versions:', e);
+    }
+  };
+
+  useEffect(() => {
+    loadSavedVersions();
+  }, [projectId]);
 
   // 1. Calculate live forecast from authoritative sources
   const liveForecast = useMemo(() => {
@@ -128,6 +150,7 @@ export const CashFlowForecastBoard: React.FC<CashFlowForecastBoardProps> = ({
           actor: currentUser,
         });
         setActiveVersion(saved);
+        await loadSavedVersions();
         setActionMessage({ type: 'success', text: `Draft version ${saved.versionCode} saved with authoritative SQLite derivation.` });
       } else {
         // Fallback in web preview mode
@@ -145,6 +168,7 @@ export const CashFlowForecastBoard: React.FC<CashFlowForecastBoardProps> = ({
           createdBy: currentUser,
         };
         setActiveVersion(mockSaved);
+        setSavedVersions((prev) => [mockSaved, ...prev.filter((v) => v.versionId !== mockSaved.versionId)]);
         setActionMessage({ type: 'success', text: `Draft version ${mockSaved.versionCode} simulated and saved locally.` });
       }
     } catch (err: any) {
@@ -173,13 +197,24 @@ export const CashFlowForecastBoard: React.FC<CashFlowForecastBoardProps> = ({
           approvedAt: new Date().toISOString(),
         });
         setActiveVersion(approved);
+        await loadSavedVersions();
         setActionMessage({ type: 'success', text: `Version ${approved.versionCode} formally approved by ${approver}. Previous versions superseded.` });
       } else {
-        setActiveVersion({
+        const updated: CashForecastVersionDto = {
           ...activeVersion,
           status: 'Approved',
           approvedBy: approver,
-        });
+        };
+        setActiveVersion(updated);
+        setSavedVersions((prev) =>
+          prev.map((v) =>
+            v.versionId === updated.versionId
+              ? updated
+              : v.status === 'Approved'
+              ? { ...v, status: 'Superseded' }
+              : v
+          )
+        );
         setActionMessage({ type: 'success', text: `Version ${activeVersion.versionCode} formally approved by ${approver}. Snapshot frozen.` });
       }
     } catch (err: any) {
@@ -208,16 +243,19 @@ export const CashFlowForecastBoard: React.FC<CashFlowForecastBoardProps> = ({
         setActiveVersion(reopened);
         setReopenModalOpen(false);
         setReopenReason('');
+        await loadSavedVersions();
         setActionMessage({ type: 'success', text: `Approved version branched into new Draft revision ${reopened.versionCode}.` });
       } else {
-        setActiveVersion({
+        const reopened: CashForecastVersionDto = {
           ...activeVersion,
           versionId: `cfv_${projectId}_${newCode}`,
           versionCode: newCode,
           status: 'Draft',
           approvedBy: null,
           createdBy: currentUser,
-        });
+        };
+        setActiveVersion(reopened);
+        setSavedVersions((prev) => [reopened, ...prev]);
         setReopenModalOpen(false);
         setReopenReason('');
         setActionMessage({ type: 'success', text: `Branched into new Draft revision ${newCode}.` });
@@ -264,6 +302,31 @@ export const CashFlowForecastBoard: React.FC<CashFlowForecastBoardProps> = ({
 
         {/* Action Controls */}
         <div className="flex items-center flex-wrap gap-2">
+          {/* Version Selector */}
+          <div className="flex items-center space-x-1 bg-gray-50 border border-gray-200 rounded-lg px-2 py-1">
+            <span className="text-xs text-gray-500 font-medium">Version:</span>
+            <select
+              value={activeVersion ? activeVersion.versionId : 'live'}
+              onChange={(e) => {
+                const val = e.target.value;
+                if (val === 'live') {
+                  setActiveVersion(null);
+                } else {
+                  const found = savedVersions.find((v) => v.versionId === val);
+                  if (found) setActiveVersion(found);
+                }
+              }}
+              className="text-xs font-semibold bg-transparent border-none text-gray-800 focus:outline-none cursor-pointer"
+            >
+              <option value="live">Live Derived ({dataDate})</option>
+              {savedVersions.map((v) => (
+                <option key={v.versionId} value={v.versionId}>
+                  {v.versionCode} — {v.status} ({v.scenario || 'Base'})
+                </option>
+              ))}
+            </select>
+          </div>
+
           <button
             onClick={() => setShowAssumptionsPanel(!showAssumptionsPanel)}
             disabled={isApproved}
