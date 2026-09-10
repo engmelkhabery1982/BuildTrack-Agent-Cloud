@@ -29,7 +29,13 @@ pub async fn save_version(path: &Path, r: SaveCashForecastVersionRequest) -> Res
     if r.operation_id.is_empty() || r.version_id.is_empty() || r.project_id.is_empty() || r.actor.is_empty() { return Err("Cash forecast version requires operation, version, project and actor.".into()); }
     if !valid_date(&r.data_date) { return Err("Cash forecast Data Date must be ISO YYYY-MM-DD.".into()); }
     if !valid_scenario(&r.scenario) || !valid_json(&r.assumptions_json) || !valid_json(&r.buckets_json) { return Err("Cash forecast scenario or governed JSON is invalid.".into()); }
+    let bucket_value: serde_json::Value = serde_json::from_str(&r.buckets_json).map_err(|e| e.to_string())?;
+    let buckets = bucket_value.as_array().ok_or("Cash forecast buckets must be an array.")?;
+    for bucket in buckets { if bucket.get("sourceIds").and_then(|v| v.as_array()).map(|v| v.is_empty()).unwrap_or(true) { return Err("Every cash forecast bucket requires governed source IDs.".into()); } }
     let pool = db(path).await?; let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+    let source_rows = sqlx::query("SELECT payload FROM cash_flow WHERE project_id=? AND json_extract(payload,'$.status') NOT IN ('Cancelled','Rejected','Reversed')").bind(&r.project_id).fetch_all(&mut *tx).await.map_err(|e| e.to_string())?;
+    let source_ids: std::collections::HashSet<String> = source_rows.into_iter().filter_map(|row| row.try_get::<String,_>("payload").ok()).filter_map(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok()).filter_map(|v| v.get("source_id").and_then(|x| x.as_str()).map(str::to_owned)).collect();
+    for bucket in buckets { for source in bucket.get("sourceIds").and_then(|v| v.as_array()).into_iter().flatten() { let id = source.as_str().ok_or("Cash forecast source ID is invalid.")?; if !source_ids.contains(id) { return Err(format!("Cash forecast source {id} is not a governed cash ledger source.")); } } }
     if let Some(row) = sqlx::query("SELECT version_id,status FROM cash_forecast_versions WHERE operation_id=?").bind(&r.operation_id).fetch_optional(&mut *tx).await.map_err(|e| e.to_string())? {
         let version_id: String = row.try_get("version_id").map_err(|e| e.to_string())?; let status: String = row.try_get("status").map_err(|e| e.to_string())?;
         tx.rollback().await.map_err(|e| e.to_string())?; return Ok(CashForecastVersionResult { operation_id: r.operation_id, version_id, status });
