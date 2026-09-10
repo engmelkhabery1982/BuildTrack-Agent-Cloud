@@ -37,9 +37,9 @@ test('universal agent prompt enforces governed sources, atomic transitions and h
 test('active and master work orders point to the current gate and detailed authority', () => {
   const active = read('docs/agent-work-orders/ACTIVE.md');
   const master = read('docs/agent-work-orders/MASTER_CLOUD_DEVELOPMENT_WORK_ORDER_AR.md');
-  assert.match(active, /CURRENT_FEATURE=W04/);
-  assert.match(active, /CURRENT_STATUS=IN_PROGRESS_NOT_ACCEPTED/);
-  assert.match(active, /PREREQUISITE=W03:CLOSED_8_OF_10_BY_CODEX/);
+  assert.match(active, /CURRENT_FEATURE=W06/);
+  assert.match(active, /CURRENT_STATUS=OPEN_SEQUENTIAL_CANDIDATE/);
+  assert.match(active, /PREREQUISITE=W04:CLOSED_8_OF_10_BY_CODEX/);
   assert.match(active, /CLOUD_BASE_BRANCH=main/);
   assert.match(active, /DELIVERY_BRANCH=CURRENT_BOUND_BRANCH/);
   assert.match(active, /EXECUTION_MODE=OPEN_SEQUENTIAL_CANDIDATE_QUEUE/);
@@ -90,14 +90,15 @@ test('machine agent gates enforce accepted ancestry, allowlists and executable e
   assert.match(portableDelivery, /PENDING_LOCAL_CARGO/);
 });
 
-test('accepted W03 attestation is line-ending independent for Windows and Arena', () => {
+test('current accepted attestation is line-ending independent for Windows and Arena', () => {
   const active = read('docs/agent-work-orders/ACTIVE.md');
   const parsed = Object.fromEntries(active.split(/\r?\n/)
     .map((line) => line.match(/^([A-Z_][A-Z0-9_]*)=(.*)$/)).filter(Boolean)
     .map((match) => [match[1], match[2].trim()]));
   const expected = active.match(/^ACCEPTED_ATTESTATION_SHA256=(.+)$/m)?.[1].trim();
   assert.equal(parsed.ACCEPTED_ATTESTATION_SHA256, expected);
-  const source = read('docs/agent-results/CODEX_W03_ACCEPTANCE_2026-09-09.md').replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
+  assert.ok(parsed.ACCEPTED_ATTESTATION_FILE, 'ACTIVE must select its accepted attestation file');
+  const source = read(parsed.ACCEPTED_ATTESTATION_FILE).replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
   const digest = (text) => createHash('sha256').update(text.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n'), 'utf8').digest('hex').toUpperCase();
   assert.equal(digest(source), expected);
   assert.equal(digest(source.replace(/\n/g, '\r\n')), expected);
