@@ -68,9 +68,8 @@ export function applyCashAssumptionsToPeriods(
     const actualOut = p.actualOutflow ?? 0;
 
     const netPlanned = plannedIn - plannedOut;
-    const netActual = (p.actualInflow !== undefined || p.actualOutflow !== undefined)
-      ? actualIn - actualOut
-      : netPlanned;
+    // Missing actuals are zero; forecast must never be presented as settled cash.
+    const netActual = actualIn - actualOut;
 
     runningCumulative += netActual;
 
@@ -103,9 +102,8 @@ export function calculateCashFlowForecast(
     const actualIn = period.actualInflow ?? 0;
     const actualOut = period.actualOutflow ?? 0;
     const netPlanned = period.plannedInflow - period.plannedOutflow;
-    const netActual = (period.actualInflow !== undefined || period.actualOutflow !== undefined)
-      ? actualIn - actualOut
-      : netPlanned;
+    // Missing actuals are zero; planned values remain forecast-only.
+    const netActual = actualIn - actualOut;
 
     cumulativeCash += netActual;
 

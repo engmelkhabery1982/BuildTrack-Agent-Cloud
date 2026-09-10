@@ -76,3 +76,20 @@ test("F5 Versioned Cash Forecast - calculates Peak Working Capital Deficit and v
   assert.strictEqual(comparison.workingCapitalImpact, 10000); // 30000 - 20000 = 10000 deficit increase
   assert.strictEqual(comparison.finalCashDifference, -10000);
 });
+
+test('W05 approved partials keep actual and remaining forecast separated', async () => {
+  const { buildVersionedCashForecast } = await import('../src/utils/cashForecast.ts');
+  const rows = buildVersionedCashForecast([
+    { sourceId: 'pc1', sourceKind: 'ApprovedCertificate', date: '2026-01-10', amount: 1000, direction: 'Inflow', status: 'Partially Paid', paidAmount: 400 },
+    { sourceId: 'ap1', sourceKind: 'PostedAP', date: '2026-01-15', amount: 300, direction: 'Outflow', status: 'Paid', paidAmount: 300 },
+    { sourceId: 'draft', sourceKind: 'ApprovedCertificate', date: '2026-01-20', amount: 50, direction: 'Inflow', status: 'Committed', paidAmount: 0 },
+  ], '2026-01-31');
+  assert.equal(rows[0].actualInflow, 400); assert.equal(rows[0].forecastInflow, 600); assert.equal(rows[0].actualOutflow, 300); assert.equal(rows[0].forecastOutflow, 0); assert.deepEqual(rows[0].sourceIds, ['pc1', 'ap1']);
+});
+
+test('W05 version requires Data Date and immutable maker-checker approval', async () => {
+  const { createCashForecastVersion, approveCashForecastVersion, buildVersionedCashForecast } = await import('../src/utils/cashForecast.ts');
+  assert.throws(() => buildVersionedCashForecast([], ''), /Data Date/);
+  const draft = createCashForecastVersion({ versionId: 'v1', scenario: 'Base', dataDate: '2026-01-31', assumptions: {}, buckets: [{ period: '2026-02', actualInflow: 0, actualOutflow: 0, forecastInflow: 1, forecastOutflow: 0, closingCash: 1, sourceIds: ['pc1'], actualSourceIds: [], forecastSourceIds: ['pc1'] }] });
+  assert.throws(() => approveCashForecastVersion(draft, ''), /identified actor/); assert.equal(approveCashForecastVersion(draft, 'finance').status, 'Approved');
+});

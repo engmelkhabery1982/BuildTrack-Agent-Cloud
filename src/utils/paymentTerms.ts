@@ -1,8 +1,8 @@
 import { addCalendarDays } from './schedulePlanning.ts';
-
-/** Returns the governed payment due date. Zero/blank terms mean due on the
- * commercial document date; negative terms are deliberately ignored. */
+/** Missing terms are unavailable; explicit negative terms are clamped to due-on-document-date for legacy contract compatibility. */
 export function dueDateFromTerms(documentDate: string | null | undefined, paymentTermsDays: unknown): string | null {
-  const terms = Math.max(0, Math.round(Number(paymentTermsDays) || 0));
-  return addCalendarDays(documentDate, terms);
+  if (!documentDate || paymentTermsDays === null || paymentTermsDays === undefined || paymentTermsDays === '') return null;
+  const terms = Number(paymentTermsDays);
+  if (!Number.isFinite(terms)) return null;
+  return addCalendarDays(documentDate, Math.max(0, Math.round(terms)));
 }

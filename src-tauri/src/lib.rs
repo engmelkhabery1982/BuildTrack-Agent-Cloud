@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use tauri::Manager;
 
 mod claims_workflow;
+mod cash_forecast;
 mod certificate_workflow;
 mod commercial_workflow;
 mod cost_plan_versioning;
@@ -3671,6 +3672,15 @@ pub fn run() {
             "#,
             kind: tauri_plugin_sql::MigrationKind::Up,
         },
+        tauri_plugin_sql::Migration {
+            version: 77, description: "versioned_cash_forecast_assumptions", sql: r#"
+              CREATE TABLE IF NOT EXISTS cash_forecast_mutation_guard (operation_id TEXT PRIMARY KEY, created_at TEXT NOT NULL);
+              CREATE TABLE IF NOT EXISTS cash_forecast_versions (version_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, data_date TEXT NOT NULL, scenario TEXT NOT NULL, status TEXT NOT NULL, assumptions_json TEXT NOT NULL, buckets_json TEXT NOT NULL, created_by TEXT NOT NULL, created_at TEXT NOT NULL, approved_by TEXT, approved_at TEXT);
+              CREATE TABLE IF NOT EXISTS cash_forecast_operations (operation_id TEXT PRIMARY KEY, version_id TEXT NOT NULL, command TEXT NOT NULL, result_json TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY(version_id) REFERENCES cash_forecast_versions(version_id) ON DELETE RESTRICT);
+              CREATE TRIGGER IF NOT EXISTS cash_forecast_immutable_update BEFORE UPDATE ON cash_forecast_versions WHEN OLD.status IN ('Approved','Superseded') AND NOT EXISTS (SELECT 1 FROM cash_forecast_mutation_guard) BEGIN SELECT RAISE(ABORT, 'Approved cash forecast versions are immutable.'); END;
+              CREATE TRIGGER IF NOT EXISTS cash_forecast_immutable_delete BEFORE DELETE ON cash_forecast_versions WHEN OLD.status IN ('Approved','Superseded') BEGIN SELECT RAISE(ABORT, 'Cash forecast history is append-only.'); END;
+            "#, kind: tauri_plugin_sql::MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()
@@ -3698,6 +3708,8 @@ pub fn run() {
             approve_variation,
             approve_payment_certificate,
             create_payment_certificate_draft,
+            save_cash_forecast_version,
+            approve_cash_forecast_version,
             submit_payment_certificate,
             approve_payment_certificate_governed,
             record_partial_payment,
@@ -3736,6 +3748,17 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[tauri::command]
+async fn save_cash_forecast_version(app: tauri::AppHandle, request: cash_forecast::SaveCashForecastVersionRequest) -> Result<cash_forecast::CashForecastVersionResult, String> {
+    let path = app.path().app_config_dir().map_err(|e| e.to_string())?.join("buildtrack.db");
+    cash_forecast::save_version(&path, request).await
+}
+#[tauri::command]
+async fn approve_cash_forecast_version(app: tauri::AppHandle, request: cash_forecast::ApproveCashForecastVersionRequest) -> Result<cash_forecast::CashForecastVersionResult, String> {
+    let path = app.path().app_config_dir().map_err(|e| e.to_string())?.join("buildtrack.db");
+    cash_forecast::approve_version(&path, request).await
 }
 
 #[tauri::command]

@@ -1,36 +1,18 @@
-export interface CashForecastPoint {
-  actualNet: number;
-  forecastNet: number;
-  openForecastNet: number;
+export type CashScenario = 'Base' | 'Optimistic' | 'Pessimistic';
+export interface CashSource { sourceId:string; sourceKind:'ApprovedCertificate'|'PostedAP'|'POCommitment'; date:string; paidDate?:string|null; dueDate?:string|null; amount:number; direction:'Inflow'|'Outflow'; status:'Approved'|'Posted'|'Committed'|'Paid'|'Partially Paid'; paidAmount?:number; }
+export interface CashForecastBucket { period:string; actualInflow:number; actualOutflow:number; forecastInflow:number; forecastOutflow:number; closingCash:number; sourceIds:string[]; actualSourceIds:string[]; forecastSourceIds:string[]; }
+export interface CashForecastVersion { versionId:string; status:'Draft'|'Approved'|'Superseded'; scenario:CashScenario; dataDate:string; assumptions:Readonly<Record<string,number>>; buckets:readonly CashForecastBucket[]; createdAt:string; }
+const round=(v:number)=>Math.round(v*100)/100;
+const iso=(v:unknown):v is string=>typeof v==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(v);
+export function isActiveCashMovement(row:Record<string,any>):boolean{return iso(row.date)&&!['Cancelled','Rejected','Reversed'].includes(String(row.status||''));}
+function allowed(s:CashSource){return s.sourceKind==='ApprovedCertificate'?['Approved','Partially Paid','Paid'].includes(s.status):s.sourceKind==='PostedAP'?['Posted','Partially Paid','Paid'].includes(s.status):s.status==='Committed';}
+export function buildVersionedCashForecast(sources:CashSource[],dataDate:string,scenario:CashScenario='Base',assumptions:Readonly<Record<string,number>>={}):CashForecastBucket[]{
+ if(!iso(dataDate))throw new Error('Data Date is required as an ISO date.'); const groups=new Map<string,CashForecastBucket>();
+ for(const s of sources.filter(x=>isActiveCashMovement(x)&&allowed(x))){const gross=Math.max(0,Number(s.amount)||0), paid=Math.min(gross,Math.max(0,Number(s.paidAmount)||0)); const settlement=s.paidDate||s.date; const actual=paid>0&&settlement<=dataDate?paid:0; const remaining=round(gross-paid); const multiplier=scenario==='Optimistic'?1.05:scenario==='Pessimistic'?0.95:1; const forecast=round(remaining*multiplier); if(!actual&&!forecast)continue; const period=(actual?settlement:(s.dueDate||s.date)).slice(0,7); const b=groups.get(period)||{period,actualInflow:0,actualOutflow:0,forecastInflow:0,forecastOutflow:0,closingCash:0,sourceIds:[],actualSourceIds:[],forecastSourceIds:[]}; b.sourceIds.push(s.sourceId); if(actual)b.actualSourceIds.push(s.sourceId); if(forecast)b.forecastSourceIds.push(s.sourceId); if(s.direction==='Inflow'){b.actualInflow+=actual;b.forecastInflow+=forecast;}else{b.actualOutflow+=actual;b.forecastOutflow+=forecast;} groups.set(period,b);}
+ let closing=0; return [...groups.values()].sort((a,b)=>a.period.localeCompare(b.period)).map(b=>{closing=round(closing+b.actualInflow-b.actualOutflow+b.forecastInflow-b.forecastOutflow);return {...b,actualInflow:round(b.actualInflow),actualOutflow:round(b.actualOutflow),forecastInflow:round(b.forecastInflow),forecastOutflow:round(b.forecastOutflow),closingCash:closing,sourceIds:[...new Set(b.sourceIds)],actualSourceIds:[...new Set(b.actualSourceIds)],forecastSourceIds:[...new Set(b.forecastSourceIds)]};});
 }
-
-function rounded(value: number): number {
-  return Math.round(value * 100) / 100;
-}
-
-/** A governed cash row participates only when it is dated and not cancelled.
- * Forecast rows are expected cash, while Actual/Manual rows are settled cash.
- * Keeping them separate prevents a forecast from being presented as cash in
- * bank and prevents cancelled projections from remaining on executive charts.
- */
-export function isActiveCashMovement(row: Record<string, any>): boolean {
-  return Boolean(String(row.date || '')) && !['Cancelled', 'Rejected', 'Reversed'].includes(String(row.status || ''));
-}
-
-export function cashForecastAt(
-  rows: Record<string, any>[],
-  reportDate: string,
-): CashForecastPoint {
-  const dated = rows.filter((row) => isActiveCashMovement(row) && String(row.date) <= reportDate);
-  const actualNet = dated
-    .filter((row) => String(row.movement_type || 'Manual') !== 'Forecast')
-    .reduce((sum, row) => sum + (Number(row.inflow) || 0) - (Number(row.outflow) || 0), 0);
-  const openForecastNet = dated
-    .filter((row) => String(row.movement_type || '') === 'Forecast' && ['Open', 'Approved', 'Submitted', ''].includes(String(row.status || '')))
-    .reduce((sum, row) => sum + (Number(row.inflow) || 0) - (Number(row.outflow) || 0), 0);
-  return {
-    actualNet: rounded(actualNet),
-    openForecastNet: rounded(openForecastNet),
-    forecastNet: rounded(actualNet + openForecastNet),
-  };
-}
+export function createCashForecastVersion(input:Omit<CashForecastVersion,'status'|'createdAt'>):CashForecastVersion{if(!input.versionId||!iso(input.dataDate)||input.buckets.some(b=>!b.sourceIds.length))throw new Error('Forecast version requires an ID, Data Date and traceable buckets.');return Object.freeze({...input,status:'Draft',assumptions:Object.freeze({...input.assumptions}),buckets:Object.freeze(input.buckets.map(b=>Object.freeze({...b,sourceIds:[...b.sourceIds],actualSourceIds:[...b.actualSourceIds],forecastSourceIds:[...b.forecastSourceIds]}))),createdAt:new Date().toISOString()});}
+export function approveCashForecastVersion(v:CashForecastVersion,actor:string):CashForecastVersion{if(!actor.trim()||v.status!=='Draft')throw new Error('Only a Draft forecast can be approved by an identified actor.');return Object.freeze({...v,status:'Approved'});}
+export function isActiveForecastVersion(v:CashForecastVersion){return v.status==='Approved';}
+export interface CashForecastPoint{actualNet:number;forecastNet:number;openForecastNet:number;}
+export function cashForecastAt(rows:Record<string,any>[],date:string):CashForecastPoint{const d=rows.filter(r=>isActiveCashMovement(r)&&String(r.date)<=date);const actual=d.filter(r=>r.movement_type!=='Forecast').reduce((x,r)=>x+(Number(r.inflow)||0)-(Number(r.outflow)||0),0);const open=d.filter(r=>r.movement_type==='Forecast'&&['Open','Approved','Submitted',''].includes(String(r.status||''))).reduce((x,r)=>x+(Number(r.inflow)||0)-(Number(r.outflow)||0),0);return{actualNet:round(actual),openForecastNet:round(open),forecastNet:round(actual+open)};}
