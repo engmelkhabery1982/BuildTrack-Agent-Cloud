@@ -26,6 +26,13 @@ governance test suite.
 3. `W05-C03 SNAPSHOT_STATUS_CONSISTENCY`: when an older Approved version becomes Superseded, update its immutable snapshot through the governed transaction so `get/list` cannot display two Approved versions.
 4. `W05-C04 APPROVAL_TIMESTAMP`: validate and persist the supplied approval date or remove it from the API; it must not be accepted and silently ignored.
 5. `W05-C05 EXECUTABLE_NEGATIVE_TESTS`: add Rust tests for missing payment terms, reopen replay, late transactional rollback, status/snapshot consistency, and locked-period mutation.
+6. `W05-C06 EXACT_GREGORIAN_DUE_DATES`: replace the 365/30-day approximation in `add_days_iso`. Due dates must use exact Gregorian calendar-day arithmetic across month ends, year ends, and leap years; invalid source dates must be rejected. Add executable Rust boundary tests (including 2028-02-28 + 1/2 days and month/year rollover).
+7. `W05-C07 SOURCE_SPECIFIC_PAYMENT_TERMS`: supplier invoices and purchase orders must use the approved payment terms of their own supplier/PO/contract authority. Never apply the first subcontract contract's terms to every supplier. Missing or ambiguous supplier authority must return `Requires setup` with the source id.
+8. `W05-C08 NO_SILENT_FINANCIAL_FALLBACKS`: required source amounts, dates, types, and settlement fields must not silently become zero, `Client`, or the Data Date. Reject or expose a governed Data Quality exception; malformed facts must not enter forecast buckets.
+9. `W05-C09 FRESH_DELIVERY_EVIDENCE`: regenerate `W05_EVIDENCE.json` after the final code and dependency lock are complete. It must contain the actual final hashes and local Cargo/Node/build results; stale pre-correction evidence is invalid.
 
-The open sequential queue may proceed to W06 without waiting for Codex, but these
-items remain mandatory before W05 can be rated or reported as 8/10.
+The open sequential queue must remain on W05 until these items pass the delivery gate;
+W06 must not start yet. Codex local verification of candidate `96916e9` passed 8 targeted
+Rust tests and 279 Node tests, lint and build, but those green tests do not cover C06-C09.
+The candidate also removed `framer-motion` from `package-lock.json` while retaining it in
+`package.json`; restore lock consistency without changing declared dependencies.

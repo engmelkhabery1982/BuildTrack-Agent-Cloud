@@ -50,7 +50,7 @@ DELETE_ALLOWLIST=[]
 MODIFY_ALLOWLIST=src/utils/cashForecast.ts|src/utils/cashFlowForecast.ts|src/utils/paymentTerms.ts|src/components/CashFlowForecastBoard.tsx|src/data/commercialWorkflow.ts|src/types/index.ts|src/data/dataDictionary.ts|src/data/sqliteRepository.ts|src/hooks/useData.ts|src-tauri/src/cash_forecast_workflow.rs|src-tauri/src/lib.rs|src/App.tsx|tests/cash-forecast-assumptions-engine.test.mjs|tests/cash-forecast-governance.test.mjs|tests/tauri-command-registration.test.mjs|docs/agent-results/W05_RESULT.md|docs/agent-results/W05_EVIDENCE.json|docs/agent-results/AGENT_QUEUE_CURSOR.md
 CONDITIONAL_MODIFY=src/components/Dashboard.tsx
 FORBIDDEN=AGENTS.md|docs/agent-work-orders/**|package.json|package-lock.json|bun.lock|src-tauri/Cargo.toml|src-tauri/Cargo.lock|vite.config.*|.env*|metadata.json
-REQUIRED_GAPS=W05-G01|W05-G02|W05-G03|W05-G04|W05-G05|W05-G06|W05-G07|W05-G08|W05-G09|W05-G10|W05-C01|W05-C02|W05-C03|W05-C04|W05-C05
+REQUIRED_GAPS=W05-G01|W05-G02|W05-G03|W05-G04|W05-G05|W05-G06|W05-G07|W05-G08|W05-G09|W05-G10|W05-C01|W05-C02|W05-C03|W05-C04|W05-C05|W05-C06|W05-C07|W05-C08|W05-C09
 REQUIRED_TESTS=npm test|npm run build|cargo test --manifest-path src-tauri/Cargo.toml|git diff --check
 KNOWN_FAILED_DELIVERY=arena/01a084ca-buildtrack-agent-cloud@89cffb0:DO_NOT_MERGE_W05_RUST_COMPILE_AND_SCHEMA_FAILURE
 ```
@@ -59,7 +59,7 @@ KNOWN_FAILED_DELIVERY=arena/01a084ca-buildtrack-agent-cloud@89cffb0:DO_NOT_MERGE
 
 - ابدأ فقط بعد نجاح `node tools/agent-preflight.mjs`.
 - ابدأ من أحدث `agent-cloud/main` ومن `AGENT_QUEUE_CURSOR.next_feature`. W04 معتمدة؛ حافظ
-  على تطبيق W05 المفضل في `main` وأغلق فقط `W05-C01..C05` الموثقة في تقرير Codex.
+  على تطبيق W05 المفضل في `main` وأغلق جميع `W05-C01..C09` الموثقة في تقرير Codex.
 - لا تبدأ W06 قبل نجاح جميع تصحيحات W05 وبواباتها. بعد نجاح التسليم انتقل تلقائيًا إلى W06.
 - الفرع الموجود في `KNOWN_FAILED_DELIVERY` مرجع فشل فقط؛ لا تدمجه ولا تستعد ملفات W05 منه.
 - لا تعدل قائمة `CONDITIONAL_MODIFY` إلا عند إثبات dependency مباشر وتسجيل السبب.
